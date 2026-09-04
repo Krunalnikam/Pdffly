@@ -55,24 +55,34 @@ import { SettingsMenu } from "@/components/SettingsMenu";
 import { getSavedProfile, saveStudentProfile } from "@/lib/profile";
 import { StudentProfile } from "@/types";
 import { useLanguage } from "@/lib/i18n";
+import { getSiteUrl } from "@/lib/site-url";
 
 export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Assignment PDF Maker — Photos to Submission PDF" },
-      {
-        name: "description",
-        content:
-          "Upload assignment photos, auto-detect document borders, perspective crop, add your student details, and download a submission PDF.",
-      },
-      { property: "og:title", content: "Assignment PDF Maker" },
-      {
-        property: "og:description",
-        content:
-          "Turn handwritten assignment photos into a ready-to-submit PDF with built-in document scanner auto-crop.",
-      },
-    ],
-  }),
+  head: () => {
+    const siteUrl = getSiteUrl();
+    const pageUrl = `${siteUrl}/`;
+    const ogJpg = `${siteUrl}/og-image.jpg`;
+
+    return {
+      meta: [
+        { title: "Assignment PDF Maker — Photos to Submission PDF" },
+        {
+          name: "description",
+          content:
+            "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF.",
+        },
+        { property: "og:title", content: "Assignment PDF Maker — Photos to Submission PDF" },
+        {
+          property: "og:description",
+          content:
+            "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF.",
+        },
+        { property: "og:url", content: pageUrl },
+        { property: "og:image", content: ogJpg },
+        { property: "og:image:secure_url", content: ogJpg },
+      ],
+    };
+  },
   component: Index,
 });
 

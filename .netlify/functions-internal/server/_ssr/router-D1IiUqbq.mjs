@@ -1,14 +1,15 @@
 import { o as __toESM } from "../_runtime.mjs";
+import { t as getSiteUrl } from "./ssr.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { _ as createRootRouteWithContext, g as createFileRoute, h as lazyRouteComponent, l as Scripts, m as Outlet, p as createRouter, u as HeadContent, v as Link, y as useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
-import { a as TSS_SERVER_FUNCTION, i as createServerFn, o as getServerFnById, s as __exportAll } from "./server-DhCfMIF9.mjs";
+import { a as TSS_SERVER_FUNCTION, i as createServerFn, o as getServerFnById, s as __exportAll } from "./server-D9M2U8KA.mjs";
 import { t as QueryClientProvider } from "../_libs/tanstack__react-query.mjs";
 import { t as QueryClient } from "../_libs/tanstack__query-core.mjs";
 import { t as require_jsx_dev_runtime } from "../_libs/react.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-DDjsreg3.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-D1IiUqbq.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_dev_runtime = require_jsx_dev_runtime();
-var styles_default = "/assets/styles-6hYKZ5zH.css";
+var styles_default = "/assets/styles-DlZi9W9Y.css";
 function reportAppError(error, context = {}) {
 	if (typeof window === "undefined") return;
 	console.error("Application error:", error, context);
@@ -844,7 +845,7 @@ function NotFoundComponent() {
 					children: "404"
 				}, void 0, false, {
 					fileName: _jsxFileName,
-					lineNumber: 22,
+					lineNumber: 23,
 					columnNumber: 9
 				}, this),
 				/* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)("h2", {
@@ -852,7 +853,7 @@ function NotFoundComponent() {
 					children: "Page not found"
 				}, void 0, false, {
 					fileName: _jsxFileName,
-					lineNumber: 23,
+					lineNumber: 24,
 					columnNumber: 9
 				}, this),
 				/* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)("p", {
@@ -860,7 +861,7 @@ function NotFoundComponent() {
 					children: "The page you're looking for doesn't exist or has been moved."
 				}, void 0, false, {
 					fileName: _jsxFileName,
-					lineNumber: 24,
+					lineNumber: 25,
 					columnNumber: 9
 				}, this),
 				/* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)("div", {
@@ -871,23 +872,23 @@ function NotFoundComponent() {
 						children: "Go home"
 					}, void 0, false, {
 						fileName: _jsxFileName,
-						lineNumber: 28,
+						lineNumber: 29,
 						columnNumber: 11
 					}, this)
 				}, void 0, false, {
 					fileName: _jsxFileName,
-					lineNumber: 27,
+					lineNumber: 28,
 					columnNumber: 9
 				}, this)
 			]
 		}, void 0, true, {
 			fileName: _jsxFileName,
-			lineNumber: 21,
+			lineNumber: 22,
 			columnNumber: 7
 		}, this)
 	}, void 0, false, {
 		fileName: _jsxFileName,
-		lineNumber: 20,
+		lineNumber: 21,
 		columnNumber: 5
 	}, this);
 }
@@ -907,7 +908,7 @@ function ErrorComponent({ error, reset }) {
 					children: "This page didn't load"
 				}, void 0, false, {
 					fileName: _jsxFileName,
-					lineNumber: 50,
+					lineNumber: 51,
 					columnNumber: 9
 				}, this),
 				/* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)("p", {
@@ -915,7 +916,7 @@ function ErrorComponent({ error, reset }) {
 					children: "Something went wrong on our end. You can try refreshing or head back home."
 				}, void 0, false, {
 					fileName: _jsxFileName,
-					lineNumber: 53,
+					lineNumber: 54,
 					columnNumber: 9
 				}, this),
 				/* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)("div", {
@@ -929,7 +930,7 @@ function ErrorComponent({ error, reset }) {
 						children: "Try again"
 					}, void 0, false, {
 						fileName: _jsxFileName,
-						lineNumber: 57,
+						lineNumber: 58,
 						columnNumber: 11
 					}, this), /* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)("a", {
 						href: "/",
@@ -937,121 +938,176 @@ function ErrorComponent({ error, reset }) {
 						children: "Go home"
 					}, void 0, false, {
 						fileName: _jsxFileName,
-						lineNumber: 66,
+						lineNumber: 67,
 						columnNumber: 11
 					}, this)]
 				}, void 0, true, {
 					fileName: _jsxFileName,
-					lineNumber: 56,
+					lineNumber: 57,
 					columnNumber: 9
 				}, this)
 			]
 		}, void 0, true, {
 			fileName: _jsxFileName,
-			lineNumber: 49,
+			lineNumber: 50,
 			columnNumber: 7
 		}, this)
 	}, void 0, false, {
 		fileName: _jsxFileName,
-		lineNumber: 48,
+		lineNumber: 49,
 		columnNumber: 5
 	}, this);
 }
 var Route$2 = createRootRouteWithContext()({
-	head: () => ({
-		meta: [
-			{ charSet: "utf-8" },
-			{
-				name: "viewport",
-				content: "width=device-width, initial-scale=1"
-			},
-			{ title: "Assignment PDF Maker" },
-			{
-				name: "description",
-				content: "Convert assignment photos to clean submission PDFs with automatic edge crop, smart document filter, and formatted roll number details."
-			},
-			{
-				name: "author",
-				content: "Assignment PDF Maker"
-			},
-			{
-				property: "og:site_name",
-				content: "Assignment PDF Maker"
-			},
-			{
-				property: "og:title",
-				content: "Assignment PDF Maker"
-			},
-			{
-				property: "og:description",
-				content: "Convert assignment photos to clean submission PDFs with automatic edge crop, smart document filter, and formatted roll number details."
-			},
-			{
-				property: "og:type",
-				content: "website"
-			},
-			{
-				property: "og:image",
-				content: "/og-image.png"
-			},
-			{
-				property: "og:image:secure_url",
-				content: "/og-image.png"
-			},
-			{
-				property: "og:image:type",
-				content: "image/png"
-			},
-			{
-				property: "og:image:width",
-				content: "1200"
-			},
-			{
-				property: "og:image:height",
-				content: "630"
-			},
-			{
-				property: "og:image:alt",
-				content: "Assignment PDF Maker Logo and Scanner Preview"
-			},
-			{
-				name: "twitter:card",
-				content: "summary_large_image"
-			},
-			{
-				name: "twitter:title",
-				content: "Assignment PDF Maker"
-			},
-			{
-				name: "twitter:description",
-				content: "Convert assignment photos to clean submission PDFs with automatic edge crop, smart document filter, and formatted roll number details."
-			},
-			{
-				name: "twitter:image",
-				content: "/og-image.png"
-			}
-		],
-		links: [
-			{
-				rel: "stylesheet",
-				href: styles_default
-			},
-			{
-				rel: "icon",
-				href: "/favicon.svg",
-				type: "image/svg+xml"
-			},
-			{
-				rel: "icon",
-				href: "/favicon.ico",
-				type: "image/x-icon"
-			},
-			{
-				rel: "apple-touch-icon",
-				href: "/apple-touch-icon.png"
-			}
-		]
-	}),
+	head: () => {
+		const siteUrl = getSiteUrl();
+		const ogJpg = `${siteUrl}/og-image.jpg`;
+		const ogPng = `${siteUrl}/og-image.png`;
+		const pageUrl = `${siteUrl}/`;
+		return {
+			meta: [
+				{ charSet: "utf-8" },
+				{
+					name: "viewport",
+					content: "width=device-width, initial-scale=1"
+				},
+				{ title: "Assignment PDF Maker — Photos to Submission PDF" },
+				{
+					name: "description",
+					content: "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF."
+				},
+				{
+					name: "author",
+					content: "Assignment PDF Maker"
+				},
+				{
+					name: "theme-color",
+					content: "#2563EB"
+				},
+				{
+					property: "og:site_name",
+					content: "Assignment PDF Maker"
+				},
+				{
+					property: "og:title",
+					content: "Assignment PDF Maker — Photos to Submission PDF"
+				},
+				{
+					property: "og:description",
+					content: "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF."
+				},
+				{
+					property: "og:type",
+					content: "website"
+				},
+				{
+					property: "og:url",
+					content: pageUrl
+				},
+				{
+					property: "og:image",
+					content: ogJpg
+				},
+				{
+					property: "og:image:secure_url",
+					content: ogJpg
+				},
+				{
+					property: "og:image:type",
+					content: "image/jpeg"
+				},
+				{
+					property: "og:image:width",
+					content: "1200"
+				},
+				{
+					property: "og:image:height",
+					content: "630"
+				},
+				{
+					property: "og:image:alt",
+					content: "Assignment PDF Maker — Smart Document Scanner & Submission Generator"
+				},
+				{
+					property: "og:image",
+					content: ogPng
+				},
+				{
+					property: "og:image:secure_url",
+					content: ogPng
+				},
+				{
+					property: "og:image:type",
+					content: "image/png"
+				},
+				{
+					property: "og:image:width",
+					content: "1200"
+				},
+				{
+					property: "og:image:height",
+					content: "630"
+				},
+				{
+					name: "twitter:card",
+					content: "summary_large_image"
+				},
+				{
+					name: "twitter:title",
+					content: "Assignment PDF Maker — Photos to Submission PDF"
+				},
+				{
+					name: "twitter:description",
+					content: "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF."
+				},
+				{
+					name: "twitter:image",
+					content: ogJpg
+				},
+				{
+					name: "twitter:image:alt",
+					content: "Assignment PDF Maker — Smart Document Scanner & Submission Generator"
+				},
+				{
+					name: "twitter:url",
+					content: pageUrl
+				}
+			],
+			links: [
+				{
+					rel: "stylesheet",
+					href: styles_default
+				},
+				{
+					rel: "canonical",
+					href: pageUrl
+				},
+				{
+					rel: "manifest",
+					href: "/site.webmanifest"
+				},
+				{
+					rel: "icon",
+					href: "/favicon.svg",
+					type: "image/svg+xml"
+				},
+				{
+					rel: "icon",
+					href: "/favicon.ico",
+					type: "image/x-icon"
+				},
+				{
+					rel: "icon",
+					href: "/favicon.png",
+					type: "image/png"
+				},
+				{
+					rel: "apple-touch-icon",
+					href: "/apple-touch-icon.png"
+				}
+			]
+		};
+	},
 	shellComponent: RootShell,
 	component: RootComponent,
 	notFoundComponent: NotFoundComponent,
@@ -1072,28 +1128,28 @@ function RootShell({ children }) {
               } catch (e) {}
             ` } }, void 0, false, {
 			fileName: _jsxFileName,
-			lineNumber: 142,
+			lineNumber: 163,
 			columnNumber: 9
 		}, this), /* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)(HeadContent, {}, void 0, false, {
 			fileName: _jsxFileName,
-			lineNumber: 156,
+			lineNumber: 177,
 			columnNumber: 9
 		}, this)] }, void 0, true, {
 			fileName: _jsxFileName,
-			lineNumber: 141,
+			lineNumber: 162,
 			columnNumber: 7
 		}, this), /* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)("body", { children: [children, /* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)(Scripts, {}, void 0, false, {
 			fileName: _jsxFileName,
-			lineNumber: 160,
+			lineNumber: 181,
 			columnNumber: 9
 		}, this)] }, void 0, true, {
 			fileName: _jsxFileName,
-			lineNumber: 158,
+			lineNumber: 179,
 			columnNumber: 7
 		}, this)]
 	}, void 0, true, {
 		fileName: _jsxFileName,
-		lineNumber: 140,
+		lineNumber: 161,
 		columnNumber: 5
 	}, this);
 }
@@ -1106,43 +1162,60 @@ function RootComponent() {
 		client: queryClient,
 		children: /* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)(ThemeProvider, { children: /* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)(LanguageProvider, { children: /* @__PURE__ */ (0, import_jsx_dev_runtime.jsxDEV)(Outlet, {}, void 0, false, {
 			fileName: _jsxFileName,
-			lineNumber: 178,
+			lineNumber: 199,
 			columnNumber: 11
 		}, this) }, void 0, false, {
 			fileName: _jsxFileName,
-			lineNumber: 176,
+			lineNumber: 197,
 			columnNumber: 9
 		}, this) }, void 0, false, {
 			fileName: _jsxFileName,
-			lineNumber: 175,
+			lineNumber: 196,
 			columnNumber: 7
 		}, this)
 	}, void 0, false, {
 		fileName: _jsxFileName,
-		lineNumber: 174,
+		lineNumber: 195,
 		columnNumber: 5
 	}, this);
 }
-var $$splitComponentImporter$1 = () => import("./routes-3OWqiOsm.mjs");
+var $$splitComponentImporter$1 = () => import("./routes-DdyVIf6c.mjs");
 var Route$1 = createFileRoute("/")({
-	head: () => ({ meta: [
-		{ title: "Assignment PDF Maker — Photos to Submission PDF" },
-		{
-			name: "description",
-			content: "Upload assignment photos, auto-detect document borders, perspective crop, add your student details, and download a submission PDF."
-		},
-		{
-			property: "og:title",
-			content: "Assignment PDF Maker"
-		},
-		{
-			property: "og:description",
-			content: "Turn handwritten assignment photos into a ready-to-submit PDF with built-in document scanner auto-crop."
-		}
-	] }),
+	head: () => {
+		const siteUrl = getSiteUrl();
+		const pageUrl = `${siteUrl}/`;
+		const ogJpg = `${siteUrl}/og-image.jpg`;
+		return { meta: [
+			{ title: "Assignment PDF Maker — Photos to Submission PDF" },
+			{
+				name: "description",
+				content: "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF."
+			},
+			{
+				property: "og:title",
+				content: "Assignment PDF Maker — Photos to Submission PDF"
+			},
+			{
+				property: "og:description",
+				content: "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF."
+			},
+			{
+				property: "og:url",
+				content: pageUrl
+			},
+			{
+				property: "og:image",
+				content: ogJpg
+			},
+			{
+				property: "og:image:secure_url",
+				content: ogJpg
+			}
+		] };
+	},
 	component: lazyRouteComponent($$splitComponentImporter$1, "component")
 });
-var $$splitComponentImporter = () => import("./admin-C9XXJ8gw.mjs");
+var $$splitComponentImporter = () => import("./admin-4cZhZvc_.mjs");
 var Route = createFileRoute("/admin")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
 var rootRouteChildren = {
 	IndexRoute: Route$1.update({

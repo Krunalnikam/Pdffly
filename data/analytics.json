@@ -1,0 +1,21 @@
+{
+  "visitors": {
+    "vis_mtmp4tfe_u0yths2s": {
+      "visitorId": "vis_mtmp4tfe_u0yths2s",
+      "firstSeen": "2026-09-04T09:19:10.488Z",
+      "lastSeen": "2026-09-04T10:42:48.512Z",
+      "totalVisits": 2,
+      "daysVisited": ["2026-09-04"]
+    }
+  },
+  "visits": [
+    {
+      "id": "vt_1788517861806_uui3k",
+      "visitorId": "vis_mtmp4tfe_u0yths2s",
+      "sessionId": "ses_mtmtctru_4mjb3o8l",
+      "timestamp": "2026-09-04T10:31:01.805Z",
+      "date": "2026-09-04"
+    }
+  ],
+  "lastActivity": "2026-09-04T10:42:48.512Z"
+}

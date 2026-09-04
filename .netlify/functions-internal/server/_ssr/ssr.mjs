@@ -2,67 +2,69 @@
 var lastCapturedError;
 var TTL_MS = 5e3;
 function record(error) {
-	lastCapturedError = {
-		error,
-		at: Date.now()
-	};
+  lastCapturedError = {
+    error,
+    at: Date.now(),
+  };
 }
 var CAUSE_DEPTH_LIMIT = 5;
 var DESCRIPTION_LENGTH_LIMIT = 8e3;
 function describeError(error) {
-	const parts = [];
-	let current = error;
-	for (let depth = 0; depth < CAUSE_DEPTH_LIMIT && current != null; depth++) {
-		if (!(current instanceof Error)) {
-			parts.push(typeof current === "string" ? current : safeStringify(current));
-			break;
-		}
-		const label = depth === 0 ? "" : "caused by: ";
-		const status = describeStatus(current);
-		parts.push(`${label}${current.stack ?? `${current.name}: ${current.message}`}${status}`);
-		current = current.cause;
-	}
-	return parts.join("\n").slice(0, DESCRIPTION_LENGTH_LIMIT);
+  const parts = [];
+  let current = error;
+  for (let depth = 0; depth < CAUSE_DEPTH_LIMIT && current != null; depth++) {
+    if (!(current instanceof Error)) {
+      parts.push(typeof current === "string" ? current : safeStringify(current));
+      break;
+    }
+    const label = depth === 0 ? "" : "caused by: ";
+    const status = describeStatus(current);
+    parts.push(`${label}${current.stack ?? `${current.name}: ${current.message}`}${status}`);
+    current = current.cause;
+  }
+  return parts.join("\n").slice(0, DESCRIPTION_LENGTH_LIMIT);
 }
 function describeStatus(error) {
-	const { status, statusCode } = error;
-	const value = status ?? statusCode;
-	return typeof value === "number" ? ` (status ${value})` : "";
+  const { status, statusCode } = error;
+  const value = status ?? statusCode;
+  return typeof value === "number" ? ` (status ${value})` : "";
 }
 function safeStringify(value) {
-	try {
-		return JSON.stringify(value) ?? String(value);
-	} catch {
-		return String(value);
-	}
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
 }
 function isErrorLike(value) {
-	return value instanceof Error;
+  return value instanceof Error;
 }
 var originalConsoleError = console.error.bind(console);
 console.error = (...args) => {
-	originalConsoleError(...args.map((arg) => {
-		if (!isErrorLike(arg)) return arg;
-		record(arg);
-		return describeError(arg);
-	}));
+  originalConsoleError(
+    ...args.map((arg) => {
+      if (!isErrorLike(arg)) return arg;
+      record(arg);
+      return describeError(arg);
+    }),
+  );
 };
 if (typeof globalThis.addEventListener === "function") {
-	globalThis.addEventListener("error", (event) => record(event.error ?? event));
-	globalThis.addEventListener("unhandledrejection", (event) => record(event.reason));
+  globalThis.addEventListener("error", (event) => record(event.error ?? event));
+  globalThis.addEventListener("unhandledrejection", (event) => record(event.reason));
 }
 function consumeLastCapturedError() {
-	if (!lastCapturedError) return void 0;
-	if (Date.now() - lastCapturedError.at > TTL_MS) {
-		lastCapturedError = void 0;
-		return;
-	}
-	const { error } = lastCapturedError;
-	lastCapturedError = void 0;
-	return error;
+  if (!lastCapturedError) return void 0;
+  if (Date.now() - lastCapturedError.at > TTL_MS) {
+    lastCapturedError = void 0;
+    return;
+  }
+  const { error } = lastCapturedError;
+  lastCapturedError = void 0;
+  return error;
 }
 function renderErrorPage() {
-	return `<!doctype html>
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -91,40 +93,117 @@ function renderErrorPage() {
   </body>
 </html>`;
 }
+/**
+ * Canonical Site URL resolver for Open Graph, Twitter Cards, and SEO meta tags.
+ * Works across:
+ * - Netlify deployments (auto-detects Netlify's `process.env.URL` and `DEPLOY_PRIME_URL`)
+ * - Custom domain or user-defined `process.env.SITE_URL` or `VITE_SITE_URL`
+ * - Real-time incoming SSR request host/headers via `src/server.ts`
+ * - Client-side browser navigation (`window.location.origin`)
+ * - Container development/shared preview environments
+ */
+var requestOrigin = "";
+function setRequestOrigin(origin) {
+  if (!origin) return;
+  const cleaned = origin.trim().replace(/\/$/, "");
+  if (!cleaned) return;
+  if (!requestOrigin || (!cleaned.includes("localhost") && !cleaned.includes("127.0.0.1")))
+    requestOrigin = formatUrl(cleaned);
+}
+function formatUrl(urlStr) {
+  let formatted = urlStr.trim().replace(/\/$/, "");
+  if (
+    formatted.startsWith("http://") &&
+    !formatted.includes("localhost") &&
+    !formatted.includes("127.0.0.1")
+  )
+    formatted = formatted.replace(/^http:\/\//, "https://");
+  else if (!formatted.startsWith("http://") && !formatted.startsWith("https://"))
+    formatted = `https://${formatted}`;
+  return formatted;
+}
+function getSiteUrl() {
+  if (typeof process !== "undefined" && process.env) {
+    if (process.env.SITE_URL) return formatUrl(process.env.SITE_URL);
+    if (process.env.URL) return formatUrl(process.env.URL);
+    if (process.env.DEPLOY_PRIME_URL) return formatUrl(process.env.DEPLOY_PRIME_URL);
+  }
+  try {
+    if (
+      typeof import.meta !== "undefined" && {
+        BASE_URL: "/",
+        DEV: true,
+        MODE: "production",
+        PROD: false,
+        SSR: true,
+        TSS_DEV_SERVER: "false",
+        TSS_DEV_SSR_STYLES_BASEPATH: "/",
+        TSS_DEV_SSR_STYLES_ENABLED: "true",
+        TSS_DISABLE_CSRF_MIDDLEWARE_WARNING: "false",
+        TSS_INLINE_CSS_ENABLED: "false",
+        TSS_ROUTER_BASEPATH: "",
+        TSS_SERVER_FN_BASE: "/_serverFn/",
+      }
+    ) {
+    }
+  } catch {}
+  if (requestOrigin) return requestOrigin;
+  if (typeof process !== "undefined" && process.env && process.env.APP_URL)
+    return formatUrl(process.env.APP_URL);
+  if (typeof window !== "undefined" && window.location?.origin)
+    return formatUrl(window.location.origin);
+  return "https://ais-pre-xjb3ybhj5d4fwjr3buri5a-860495896694.asia-southeast1.run.app";
+}
 var serverEntryPromise;
 async function getServerEntry() {
-	if (!serverEntryPromise) serverEntryPromise = import("./server-DhCfMIF9.mjs").then((n) => n.t).then((m) => m.default ?? m);
-	return serverEntryPromise;
+  if (!serverEntryPromise)
+    serverEntryPromise = import("./server-D9M2U8KA.mjs")
+      .then((n) => n.t)
+      .then((m) => m.default ?? m);
+  return serverEntryPromise;
 }
 async function normalizeCatastrophicSsrResponse(response) {
-	if (response.status < 500) return response;
-	if (!(response.headers.get("content-type") ?? "").includes("application/json")) return response;
-	const body = await response.clone().text();
-	if (!isH3SwallowedErrorBody(body)) return response;
-	console.error(consumeLastCapturedError() ?? /* @__PURE__ */ new Error(`h3 swallowed SSR error: ${body}`));
-	return new Response(renderErrorPage(), {
-		status: 500,
-		headers: { "content-type": "text/html; charset=utf-8" }
-	});
+  if (response.status < 500) return response;
+  if (!(response.headers.get("content-type") ?? "").includes("application/json")) return response;
+  const body = await response.clone().text();
+  if (!isH3SwallowedErrorBody(body)) return response;
+  console.error(
+    consumeLastCapturedError() ?? /* @__PURE__ */ new Error(`h3 swallowed SSR error: ${body}`),
+  );
+  return new Response(renderErrorPage(), {
+    status: 500,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
 }
 function isH3SwallowedErrorBody(body) {
-	try {
-		const payload = JSON.parse(body);
-		return payload.unhandled === true && payload.message === "HTTPError";
-	} catch {
-		return false;
-	}
+  try {
+    const payload = JSON.parse(body);
+    return payload.unhandled === true && payload.message === "HTTPError";
+  } catch {
+    return false;
+  }
 }
-var server_default = { async fetch(request, env, ctx) {
-	try {
-		return await normalizeCatastrophicSsrResponse(await (await getServerEntry()).fetch(request, env, ctx));
-	} catch (error) {
-		console.error(error);
-		return new Response(renderErrorPage(), {
-			status: 500,
-			headers: { "content-type": "text/html; charset=utf-8" }
-		});
-	}
-} };
+var server_default = {
+  async fetch(request, env, ctx) {
+    try {
+      try {
+        const url = new URL(request.url);
+        const proto = request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "");
+        const host =
+          request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host;
+        if (host) setRequestOrigin(`${proto}://${host}`);
+      } catch {}
+      return await normalizeCatastrophicSsrResponse(
+        await (await getServerEntry()).fetch(request, env, ctx),
+      );
+    } catch (error) {
+      console.error(error);
+      return new Response(renderErrorPage(), {
+        status: 500,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+  },
+};
 //#endregion
-export { server_default as default, renderErrorPage as t };
+export { server_default as default, renderErrorPage as n, getSiteUrl as t };

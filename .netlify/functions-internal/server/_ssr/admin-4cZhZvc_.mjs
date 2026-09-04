@@ -2,10 +2,10 @@ import { o as __toESM } from "../_runtime.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { v as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { t as require_jsx_dev_runtime } from "../_libs/react.mjs";
-import { a as useLanguage, n as getAdminAnalyticsServerFn } from "./router-DDjsreg3.mjs";
+import { a as useLanguage, n as getAdminAnalyticsServerFn } from "./router-D1IiUqbq.mjs";
 import { $ as ArrowLeft, A as KeyRound, D as LoaderCircle, E as Lock, F as Funnel, G as ChartColumn, H as CircleAlert, K as Calendar, M as Heart, O as Lightbulb, S as MessageSquareQuote, T as LogOut, X as Bug, c as Trash2, d as Sparkles, k as Languages, m as ShieldAlert, p as ShieldCheck, u as Star, w as Mail, y as RefreshCw } from "../_libs/lucide-react.mjs";
-import { i as Input, l as verifyAdminKeyServerFn, n as Badge, o as deleteFeedbackServerFn, r as Button, s as getAdminFeedbackListServerFn, t as AdminAnalyticsView } from "./AdminAnalyticsView-BH3LYJN6.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/admin-C9XXJ8gw.js
+import { i as Input, l as verifyAdminKeyServerFn, n as Badge, o as deleteFeedbackServerFn, r as Button, s as getAdminFeedbackListServerFn, t as AdminAnalyticsView } from "./AdminAnalyticsView-BcGxBV1l.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/admin-4cZhZvc_.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_dev_runtime = require_jsx_dev_runtime();
 var _jsxFileName = "/app/applet/src/routes/admin.tsx?tsr-split=component";
