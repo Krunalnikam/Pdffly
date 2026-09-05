@@ -47,7 +47,7 @@ const DATA_DIR = path.join(process.cwd(), "data");
 const ANALYTICS_FILE = path.join(DATA_DIR, "analytics.json");
 
 function getAdminKey(): string {
-  return process.env.FEEDBACK_ADMIN_KEY?.trim() || "pdfmaker-admin";
+  return process.env.FEEDBACK_ADMIN_KEY?.trim() || "Krunal21128q";
 }
 
 // Get current date string formatted as YYYY-MM-DD

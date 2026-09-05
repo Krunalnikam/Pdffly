@@ -51,7 +51,11 @@ export const loadImage = (src: string): Promise<HTMLImageElement> =>
       // Keep cache small (max 8 images)
       if (imageCache.size > 8) {
         const firstKey = imageCache.keys().next().value;
-        if (firstKey) imageCache.delete(firstKey);
+        if (firstKey) {
+          const old = imageCache.get(firstKey);
+          if (old) old.src = "";
+          imageCache.delete(firstKey);
+        }
       }
       imageCache.set(src, img);
       resolve(img);
@@ -59,6 +63,13 @@ export const loadImage = (src: string): Promise<HTMLImageElement> =>
     img.onerror = () => reject(new Error("Could not read image"));
     img.src = src;
   });
+
+export const clearImageCache = () => {
+  imageCache.forEach((img) => {
+    img.src = "";
+  });
+  imageCache.clear();
+};
 
 const makeCanvas = (w: number, h: number) => {
   const canvas = document.createElement("canvas");
@@ -207,9 +218,11 @@ export async function detectDocument(dataUrl: string): Promise<Detection> {
   const w = Math.max(1, Math.round(img.naturalWidth * scale));
   const h = Math.max(1, Math.round(img.naturalHeight * scale));
 
-  const { ctx } = makeCanvas(w, h);
+  const { canvas, ctx } = makeCanvas(w, h);
   ctx.drawImage(img, 0, 0, w, h);
   const imageData = ctx.getImageData(0, 0, w, h);
+  canvas.width = 1;
+  canvas.height = 1;
 
   const worker = getWorker();
 
@@ -326,7 +339,17 @@ export async function warpQuad(dataUrl: string, quad: Quad, maxDim = 2400) {
   const { canvas: out, ctx: octx } = makeCanvas(w, h);
   if (!sol) {
     octx.drawImage(img, 0, 0, w, h);
-    return { dataUrl: out.toDataURL("image/jpeg", 0.95), width: w, height: h };
+    let fallbackUrl = "";
+    if (typeof out.toBlob === "function") {
+      const blob = await new Promise<Blob | null>((resolve) =>
+        out.toBlob(resolve, "image/jpeg", 0.92),
+      );
+      if (blob) fallbackUrl = URL.createObjectURL(blob);
+    }
+    if (!fallbackUrl) fallbackUrl = out.toDataURL("image/jpeg", 0.92);
+    out.width = 1;
+    out.height = 1;
+    return { dataUrl: fallbackUrl, width: w, height: h };
   }
 
   const [h11, h12, h13, h21, h22, h23, h31, h32] = sol as number[];
@@ -381,11 +404,23 @@ export async function warpQuad(dataUrl: string, quad: Quad, maxDim = 2400) {
     }
   }
   octx.putImageData(outImage, 0, 0);
-  const resultDataUrl = out.toDataURL("image/jpeg", 0.95);
+
+  let resultUrl = "";
+  if (typeof out.toBlob === "function") {
+    const blob = await new Promise<Blob | null>((resolve) =>
+      out.toBlob(resolve, "image/jpeg", 0.92),
+    );
+    if (blob) {
+      resultUrl = URL.createObjectURL(blob);
+    }
+  }
+  if (!resultUrl) {
+    resultUrl = out.toDataURL("image/jpeg", 0.92);
+  }
   out.width = 1;
   out.height = 1;
 
-  return { dataUrl: resultDataUrl, width: w, height: h };
+  return { dataUrl: resultUrl, width: w, height: h };
 }
 
 /** Rotates an image by 90, 180, 270, or -90 degrees. */
@@ -401,7 +436,19 @@ export async function rotateImage(dataUrl: string, degrees: 90 | 180 | 270 | -90
   ctx.translate(canvas.width / 2, canvas.height / 2);
   ctx.rotate((degrees * Math.PI) / 180);
   ctx.drawImage(img, -iw / 2, -ih / 2);
-  const rotated = canvas.toDataURL("image/jpeg", 0.95);
+
+  let rotated = "";
+  if (typeof canvas.toBlob === "function") {
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.95),
+    );
+    if (blob) {
+      rotated = URL.createObjectURL(blob);
+    }
+  }
+  if (!rotated) {
+    rotated = canvas.toDataURL("image/jpeg", 0.95);
+  }
   canvas.width = 1;
   canvas.height = 1;
   return rotated;
@@ -426,7 +473,7 @@ export async function autoCropImage(dataUrl: string): Promise<{
 
   if (detection.isConfident && detection.confidence >= CONFIDENCE_THRESHOLD) {
     const paddedQuad = padQuad(detection.quad, AUTO_CROP_PAD_FACTOR);
-    const warped = await warpQuad(dataUrl, paddedQuad, 2200);
+    const warped = await warpQuad(dataUrl, paddedQuad, 2000);
     return {
       dataUrl: warped.dataUrl,
       isCropped: true,

@@ -46,6 +46,7 @@ import {
   type Quad,
   autoCropImage,
   FULL_QUAD,
+  clearImageCache,
 } from "@/lib/page-scan";
 import { DocumentScannerModal } from "@/components/DocumentScannerModal";
 import { ProfileEditModal } from "@/components/ProfileEditModal";
@@ -101,6 +102,7 @@ function Index() {
   const [subject, setSubject] = useState("");
   const [examPhase, setExamPhase] = useState("");
   const [images, setImages] = useState<UploadedImage[]>([]);
+  const [isReverseOrder, setIsReverseOrder] = useState(false);
   const [smartFilterEnabled, setSmartFilterEnabled] = useState(false);
   const [qualityPreset, setQualityPreset] = useState<PdfQualityPreset>("compact");
   const [rotatingId, setRotatingId] = useState<string | null>(null);
@@ -219,6 +221,7 @@ function Index() {
         }
       });
       urls.clear();
+      clearImageCache();
     };
   }, []);
 
@@ -247,18 +250,18 @@ function Index() {
       };
     });
 
-    // Automatically reverse the newly uploaded batch once so reverse-chronological photo picker batches (5,4,3,2,1) become (1,2,3,4,5)
-    const reversedBatch = [...newImages].reverse();
+    // If Reverse Order is ON (default), reverse newly picked camera batch so (5,4,3,2,1) becomes (1,2,3,4,5)
+    const batchToAdd = isReverseOrder ? [...newImages].reverse() : newImages;
 
-    // CRITICAL: Append the new reversed batch strictly to the END of existing images (existing images are never re-reversed)
-    setImages((prev) => [...prev, ...reversedBatch]);
+    // CRITICAL: Append the new batch strictly to the END of existing images (existing images are never re-reversed)
+    setImages((prev) => [...prev, ...batchToAdd]);
     setErrors(({ images: _omit, ...rest }) => rest);
     setResult(null);
 
     if (inputRef.current) inputRef.current.value = "";
 
     // Asynchronously process the newly added images in-place with Auto Crop
-    processAutoCropForImages(reversedBatch);
+    processAutoCropForImages(batchToAdd);
   };
 
   const processAutoCropForImages = async (targetImages: UploadedImage[]) => {
@@ -266,6 +269,11 @@ function Index() {
 
     const concurrency = Math.min(3, targetImages.length);
     let index = 0;
+    let completed = 0;
+    const total = targetImages.length;
+    setIsBatchScanning(true);
+    setBatchProgress(t("processingPage", { current: 1, total }));
+
     const workers = Array.from({ length: concurrency }, async () => {
       while (index < targetImages.length) {
         const item = targetImages[index++];
@@ -273,6 +281,9 @@ function Index() {
         try {
           const res = await autoCropImage(item.originalDataUrl);
           if (res.isCropped && res.quad) {
+            if (res.dataUrl.startsWith("blob:")) {
+              createdBlobUrlsRef.current.add(res.dataUrl);
+            }
             // Update in-place by matching exact image ID, guaranteeing order remains unchanged
             setImages((prev) =>
               prev.map((img) =>
@@ -290,12 +301,17 @@ function Index() {
           }
         } catch {
           // Keep original if auto-crop fails
+        } finally {
+          completed++;
+          setBatchProgress(t("processingPage", { current: Math.min(completed, total), total }));
         }
         await new Promise((r) => setTimeout(r, 0));
       }
     });
 
     await Promise.all(workers);
+    setIsBatchScanning(false);
+    setBatchProgress("");
   };
 
   const removeImage = (id: string) => {
@@ -335,10 +351,13 @@ function Index() {
     });
   };
 
-  const reverseImagesOrder = () => {
-    if (images.length < 2) return;
-    setImages((prev) => [...prev].reverse());
-    notify(t("orderReversedNotify", { count: images.length }));
+  const toggleReverseOrder = () => {
+    const next = !isReverseOrder;
+    setIsReverseOrder(next);
+    if (images.length >= 2) {
+      setImages((prev) => [...prev].reverse());
+      notify(t("orderReversedNotify", { count: images.length }));
+    }
   };
 
   const handleQuickRotate = async (id: string, degrees: 90 | -90) => {
@@ -354,6 +373,13 @@ function Index() {
           ? nextDataUrl
           : await rotateImage(img.originalDataUrl, degrees);
       const nextQuad = img.currentQuad ? rotateQuad(img.currentQuad, degrees) : undefined;
+
+      if (nextDataUrl.startsWith("blob:")) {
+        createdBlobUrlsRef.current.add(nextDataUrl);
+      }
+      if (nextOrigUrl.startsWith("blob:") && nextOrigUrl !== nextDataUrl) {
+        createdBlobUrlsRef.current.add(nextOrigUrl);
+      }
 
       setImages((prev) =>
         prev.map((item) =>
@@ -555,6 +581,7 @@ function Index() {
       notify(msg);
     } finally {
       setIsGenerating(false);
+      clearImageCache();
     }
   };
 
@@ -794,15 +821,28 @@ function Index() {
                         <Button
                           id="btn-reverse-page-order"
                           type="button"
-                          variant="outline"
+                          variant={isReverseOrder ? "secondary" : "outline"}
                           size="sm"
-                          onClick={reverseImagesOrder}
+                          onClick={toggleReverseOrder}
                           disabled={isBatchScanning || isGenerating}
-                          className="h-7 gap-1.5 px-2.5 text-xs font-medium text-foreground hover:bg-secondary border-border/80 cursor-pointer shadow-2xs"
+                          className={`h-7 gap-1.5 px-2.5 text-xs font-medium border-border/80 cursor-pointer shadow-2xs ${
+                            isReverseOrder
+                              ? "bg-primary/10 text-primary border-primary/30 font-semibold"
+                              : "text-foreground hover:bg-secondary"
+                          }`}
                           title={t("reverseOrderTooltip")}
                         >
                           <ArrowUpDown className="h-3.5 w-3.5 text-primary shrink-0" />
                           <span>{t("reverseOrder")}</span>
+                          <span
+                            className={`text-[10px] px-1 py-0.5 rounded font-bold uppercase ${
+                              isReverseOrder
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            {isReverseOrder ? t("on") : t("off")}
+                          </span>
                         </Button>
                       )}
                     </div>

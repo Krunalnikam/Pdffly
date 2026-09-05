@@ -185,13 +185,18 @@ async function pMap<T, R>(
  * - Cleanses heavy camera metadata bloat
  * - Preserves handwriting and diagrams
  * - Zero white margins or padding
+ * - Returns pure Uint8Array to eliminate Base64 memory overhead
  */
 const optimizeImageForPdf = async (
   image: UploadedImage,
   index: number,
   enableSmartFilter = true,
   qualityPreset: PdfQualityPreset = "standard",
-) => {
+): Promise<{
+  imageBytes: Uint8Array;
+  width: number;
+  height: number;
+}> => {
   const decoded = await decodeImage(image.dataUrl, index, image.name);
   try {
     const rawWidth = decoded.naturalWidth;
@@ -231,15 +236,9 @@ const optimizeImageForPdf = async (
             quality: preset.jpegQuality,
           });
 
-          const dataUrl = await new Promise<string>((res, rej) => {
-            const reader = new FileReader();
-            reader.onloadend = () => res(reader.result as string);
-            reader.onerror = rej;
-            reader.readAsDataURL(blob);
-          });
-
+          const arrayBuffer = await blob.arrayBuffer();
           return {
-            dataUrl,
+            imageBytes: new Uint8Array(arrayBuffer),
             width: targetWidth,
             height: targetHeight,
           };
@@ -276,15 +275,21 @@ const optimizeImageForPdf = async (
       ctx.putImageData(imgData, 0, 0);
     }
 
-    // Convert to JPEG with selected compression quality
-    const optimizedDataUrl = canvas.toDataURL("image/jpeg", preset.jpegQuality);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", preset.jpegQuality),
+    );
 
     // Release canvas dimensions to assist garbage collection
     canvas.width = 1;
     canvas.height = 1;
 
+    if (!blob) {
+      throw new Error(`Page ${index + 1}: Failed to encode image.`);
+    }
+
+    const arrayBuffer = await blob.arrayBuffer();
     return {
-      dataUrl: optimizedDataUrl,
+      imageBytes: new Uint8Array(arrayBuffer),
       width: targetWidth,
       height: targetHeight,
     };
@@ -316,66 +321,35 @@ export async function generateAssignmentPdf(
     throw new Error("No images provided to generate PDF. Please upload at least one page.");
   }
 
-  // 1. Preparing images & PDF engine (approx. 20%)
+  const total = validImages.length;
+
+  // 1. Preparing images & PDF engine
   onProgress?.({
     stage: "preparing",
-    percent: 20,
-    total: validImages.length,
-  });
-  // Yield to main thread for non-blocking UI update
-  await new Promise((resolve) => setTimeout(resolve, 30));
-
-  const { jsPDF } = await import("jspdf");
-
-  // 2. Process and optimize images concurrently in batches (20% -> 70%)
-  const total = validImages.length;
-  const concurrency =
-    typeof navigator !== "undefined" && navigator.hardwareConcurrency
-      ? Math.max(2, Math.min(4, navigator.hardwareConcurrency))
-      : 3;
-
-  onProgress?.({
-    stage: "processing",
-    percent: 20,
+    percent: 10,
     current: 0,
-    total,
-  });
-
-  const optimizedImages = await pMap(
-    validImages,
-    concurrency,
-    async (item, idx) => {
-      try {
-        return await optimizeImageForPdf(item, idx, enableSmartFilter, qualityPreset);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : `Page ${idx + 1} failed to process.`;
-        throw new Error(msg);
-      }
-    },
-    (completedCount) => {
-      const currentPercent = Math.min(70, Math.round(20 + (completedCount / total) * 50));
-      onProgress?.({
-        stage: "processing",
-        percent: currentPercent,
-        current: completedCount,
-        total,
-      });
-    },
-  );
-
-  // 3. Creating PDF document pages (70% -> 90%)
-  onProgress?.({
-    stage: "creating",
-    percent: 75,
-    current: 1,
     total,
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
 
-  const first = optimizedImages[0]!;
+  const { jsPDF } = await import("jspdf");
+
+  const concurrency =
+    typeof navigator !== "undefined" && navigator.hardwareConcurrency
+      ? Math.max(2, Math.min(3, Math.floor(navigator.hardwareConcurrency / 2)))
+      : 2;
+
+  // 2. Process first image to configure jsPDF dimensions
+  onProgress?.({
+    stage: "processing",
+    percent: 15,
+    current: 1,
+    total,
+  });
+
+  const first = await optimizeImageForPdf(validImages[0]!, 0, enableSmartFilter, qualityPreset);
   const firstOrientation = first.width > first.height ? "landscape" : "portrait";
 
-  // Initialize PDF with page dimensions tailored strictly to the first image dimensions and aspect ratio
   const doc = new jsPDF({
     unit: "pt",
     format: [first.width, first.height],
@@ -383,44 +357,65 @@ export async function generateAssignmentPdf(
     compress: true,
   });
 
-  // Render the first image filling the entire page without any margins, padding, or letterboxing
-  doc.addImage(first.dataUrl, "JPEG", 0, 0, first.width, first.height, undefined, "FAST");
+  // Set document metadata
+  doc.setProperties({
+    title: buildFileName(details).replace(/\.pdf$/i, ""),
+    subject: details.subject || undefined,
+    author: details.enrollmentNumber
+      ? `${details.enrollmentNumber}${details.branch ? ` (${details.branch})` : ""}`
+      : undefined,
+    creator: "Krunal Nikam",
+  });
 
-  // Render subsequent pages, each custom-fitted to its exact image dimensions and aspect ratio
-  for (let i = 1; i < optimizedImages.length; i++) {
-    const { dataUrl, width, height } = optimizedImages[i]!;
-    const orientation = width > height ? "landscape" : "portrait";
+  // Render the first image filling the entire page without margins or letterboxing
+  doc.addImage(first.imageBytes, "JPEG", 0, 0, first.width, first.height, undefined, "FAST");
 
-    doc.addPage([width, height], orientation);
-    doc.addImage(dataUrl, "JPEG", 0, 0, width, height, undefined, "FAST");
+  // 3. Process and stream subsequent images in bounded batches so memory is freed progressively
+  for (let i = 1; i < total; i += concurrency) {
+    const chunk = validImages.slice(i, i + concurrency);
+    const chunkResults = await Promise.all(
+      chunk.map((item, relIdx) =>
+        optimizeImageForPdf(item, i + relIdx, enableSmartFilter, qualityPreset),
+      ),
+    );
 
-    const pagePercent = Math.min(90, Math.round(75 + ((i + 1) / total) * 15));
-    onProgress?.({
-      stage: "creating",
-      percent: pagePercent,
-      current: i + 1,
-      total,
-    });
+    for (let c = 0; c < chunkResults.length; c++) {
+      const pageIndex = i + c;
+      const { imageBytes, width, height } = chunkResults[c]!;
+      const orientation = width > height ? "landscape" : "portrait";
+      doc.addPage([width, height], orientation);
+      doc.addImage(imageBytes, "JPEG", 0, 0, width, height, undefined, "FAST");
 
-    // Small yield every 3 pages
-    if (i % 3 === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      const pagePercent = Math.min(90, Math.round(15 + ((pageIndex + 1) / total) * 75));
+      onProgress?.({
+        stage: "processing",
+        percent: pagePercent,
+        current: pageIndex + 1,
+        total,
+      });
     }
+
+    // Yield to the event loop between batches for responsive UI and garbage collection
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
 
-  // 4. Compressing and Finalizing (90% -> 98%)
+  // 4. Compressing and Finalizing
   onProgress?.({
     stage: "finalizing",
     percent: 95,
+    current: total,
+    total,
   });
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await new Promise((resolve) => setTimeout(resolve, 20));
 
   const blob = doc.output("blob");
 
-  // 5. Ready (100%)
+  // 5. Ready
   onProgress?.({
     stage: "ready",
     percent: 100,
+    current: total,
+    total,
   });
 
   return { blob, fileName: buildFileName(details) };

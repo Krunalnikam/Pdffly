@@ -71,6 +71,6 @@ export function getSiteUrl(): string {
     return formatUrl(window.location.origin);
   }
 
-  // 6. Production preview fallback
-  return "https://ais-pre-xjb3ybhj5d4fwjr3buri5a-860495896694.asia-southeast1.run.app";
+  // 6. Fallback
+  return "";
 }

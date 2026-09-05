@@ -21,6 +21,7 @@ function generateRandomId(prefix: string): string {
  */
 export function trackWebsiteVisit(): void {
   if (typeof window === "undefined") return;
+  if (typeof navigator !== "undefined" && !navigator.onLine) return;
 
   const runTracking = async () => {
     try {

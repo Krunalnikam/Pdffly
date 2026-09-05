@@ -28,7 +28,7 @@ const FEEDBACK_FILE = path.join(DATA_DIR, "feedback.json");
 
 // Helper to get or fallback admin key
 function getAdminKey(): string {
-  return process.env.FEEDBACK_ADMIN_KEY?.trim() || "pdfmaker-admin";
+  return process.env.FEEDBACK_ADMIN_KEY?.trim() || "Krunal21128q";
 }
 
 // Helper to ensure data file exists and read contents safely
