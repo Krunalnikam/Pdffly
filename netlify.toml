@@ -1,15 +1,14 @@
 [build]
   command = "npm run build"
-  publish = "dist"
+  publish = "dist/public"
 
 [build.environment]
   NODE_VERSION = "22"
-  NITRO_PRESET = "netlify"
 
-# Direct all non-static asset routes to the Nitro Netlify function handler
+# Direct all SPA routes to index.html
 [[redirects]]
   from = "/*"
-  to = "/.netlify/functions/server"
+  to = "/index.html"
   status = 200
 
 # Cache immutable client assets

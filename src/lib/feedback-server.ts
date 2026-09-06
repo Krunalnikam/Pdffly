@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
 export type FeedbackType = "bug" | "feature" | "improvement" | "general";
 
@@ -23,8 +24,16 @@ export interface FeedbackStats {
   generalCount: number;
 }
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const FEEDBACK_FILE = path.join(DATA_DIR, "feedback.json");
+function getDataDir(): string {
+  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(os.tmpdir(), "pdfly-data");
+  }
+  return path.join(process.cwd(), "data");
+}
+
+function getFeedbackFilePath(): string {
+  return path.join(getDataDir(), "feedback.json");
+}
 
 // Helper to get or fallback admin key
 function getAdminKey(): string {
@@ -33,27 +42,51 @@ function getAdminKey(): string {
 
 // Helper to ensure data file exists and read contents safely
 async function readFeedbacksFromFile(): Promise<StoredFeedbackItem[]> {
+  const primaryPath = getFeedbackFilePath();
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    const content = await fs.readFile(FEEDBACK_FILE, "utf-8");
+    const content = await fs.readFile(primaryPath, "utf-8");
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed)) {
       return parsed;
     }
     return [];
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
+  } catch {
+    // If not in primary path (e.g. freshly booted Netlify function), check repo seed path
+    const seedPath = path.join(process.cwd(), "data", "feedback.json");
+    try {
+      const content = await fs.readFile(seedPath, "utf-8");
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // ignore
     }
-    console.error("Error reading feedback file:", err);
     return [];
   }
 }
 
 // Helper to write feedback file safely
 async function writeFeedbacksToFile(items: StoredFeedbackItem[]): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(FEEDBACK_FILE, JSON.stringify(items, null, 2), "utf-8");
+  const dir = getDataDir();
+  const filePath = getFeedbackFilePath();
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(items, null, 2), "utf-8");
+  } catch (err) {
+    // Fallback to tmp directory if process.cwd() is read-only
+    const tmpDir = path.join(os.tmpdir(), "pdfly-data");
+    if (dir !== tmpDir) {
+      await fs.mkdir(tmpDir, { recursive: true });
+      await fs.writeFile(
+        path.join(tmpDir, "feedback.json"),
+        JSON.stringify(items, null, 2),
+        "utf-8",
+      );
+    } else {
+      console.error("Failed to write feedback file:", err);
+    }
+  }
 }
 
 /**

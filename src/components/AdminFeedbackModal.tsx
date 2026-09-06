@@ -310,8 +310,18 @@ export function AdminFeedbackModal({ isOpen, onClose }: AdminFeedbackModalProps)
                 <Lock className="h-7 w-7" />
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <h3 className="text-base font-bold text-foreground">{t("adminAuthTitle")}</h3>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary/80 border border-border/80 text-xs font-medium text-muted-foreground">
+                  <Mail className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>Owner:</span>
+                  <a
+                    href="mailto:krunalnikam021@gmail.com"
+                    className="font-semibold text-foreground hover:text-primary transition-colors select-all"
+                  >
+                    krunalnikam021@gmail.com
+                  </a>
+                </div>
                 <p className="text-xs text-muted-foreground">{t("adminAuthDesc")}</p>
               </div>
 

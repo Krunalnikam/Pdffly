@@ -32,17 +32,12 @@ export default defineConfig(({ command }) => ({
     ...(command === "build"
       ? [
           nitro({
-            preset: process.env.NITRO_PRESET || (process.env.NETLIFY ? "netlify" : "node-server"),
             host: "0.0.0.0",
-            ...(process.env.NETLIFY || process.env.NITRO_PRESET === "netlify"
-              ? {}
-              : {
-                  output: {
-                    dir: "dist",
-                    publicDir: "dist/public",
-                    serverDir: "dist/server",
-                  },
-                }),
+            output: {
+              dir: "dist",
+              publicDir: "dist/public",
+              serverDir: "dist/server",
+            },
           }),
         ]
       : []),

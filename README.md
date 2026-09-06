@@ -71,3 +71,30 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Deploying to Netlify
+
+This project is pre-configured for one-click deployment on [Netlify](https://www.netlify.com).
+
+### Method 1: Git Integration (Recommended)
+
+1. Push your repository to **GitHub**, **GitLab**, or **Bitbucket**.
+2. Log in to [Netlify](https://app.netlify.com/) and click **"Add new site"** > **"Import an existing project"**.
+3. Select your repository. Netlify will automatically detect settings from `netlify.toml`:
+   - **Build Command:** `npm run build` (or `npm run build:netlify`)
+   - **Publish Directory:** `dist/public`
+   - **Node Version:** `22` (configured in `.node-version` / `netlify.toml`)
+4. *(Optional)* In **Site configuration > Environment variables**, add:
+   - `FEEDBACK_ADMIN_KEY`: (Defaults to `Krunal21128q` if unset)
+   - `OWNER_NOTIFICATION_EMAIL`: *(Optional)* email address for notifications
+5. Click **"Deploy site"**.
+
+### Method 2: Netlify CLI
+
+```sh
+npm install -g netlify-cli
+ntl login
+ntl init
+ntl deploy --prod
+```
+

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
 export interface VisitorRecord {
   visitorId: string;
@@ -43,8 +44,16 @@ export interface AnalyticsSummary {
   monthlyVisitors: ActivityBucket[];
 }
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const ANALYTICS_FILE = path.join(DATA_DIR, "analytics.json");
+function getDataDir(): string {
+  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(os.tmpdir(), "pdfly-data");
+  }
+  return path.join(process.cwd(), "data");
+}
+
+function getAnalyticsFilePath(): string {
+  return path.join(getDataDir(), "analytics.json");
+}
 
 function getAdminKey(): string {
   return process.env.FEEDBACK_ADMIN_KEY?.trim() || "Krunal21128q";
@@ -57,9 +66,9 @@ function getLocalDateString(d: Date = new Date()): string {
 
 // Helper to ensure data file exists and read analytics safely
 async function readAnalyticsFromFile(): Promise<StoredAnalyticsData> {
+  const primaryFile = getAnalyticsFilePath();
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    const content = await fs.readFile(ANALYTICS_FILE, "utf-8");
+    const content = await fs.readFile(primaryFile, "utf-8");
     const parsed = JSON.parse(content);
     if (parsed && typeof parsed === "object") {
       return {
@@ -68,9 +77,21 @@ async function readAnalyticsFromFile(): Promise<StoredAnalyticsData> {
         lastActivity: parsed.lastActivity || new Date().toISOString(),
       };
     }
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.error("Error reading analytics file:", err);
+  } catch {
+    // If not in primary path, fallback to reading bundled seed file if available
+    const seedFile = path.join(process.cwd(), "data", "analytics.json");
+    try {
+      const content = await fs.readFile(seedFile, "utf-8");
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed === "object") {
+        return {
+          visitors: parsed.visitors || {},
+          visits: Array.isArray(parsed.visits) ? parsed.visits : [],
+          lastActivity: parsed.lastActivity || new Date().toISOString(),
+        };
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -83,12 +104,31 @@ async function readAnalyticsFromFile(): Promise<StoredAnalyticsData> {
 
 // Helper to write analytics file safely
 async function writeAnalyticsToFile(data: StoredAnalyticsData): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  const dir = getDataDir();
+  const filePath = getAnalyticsFilePath();
+
   // Keep maximum recent 5,000 visit events to prevent unbounded file growth
   if (data.visits.length > 5000) {
     data.visits = data.visits.slice(-5000);
   }
-  await fs.writeFile(ANALYTICS_FILE, JSON.stringify(data, null, 2), "utf-8");
+
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    // Fallback to tmp directory if process.cwd() is read-only
+    const tmpDir = path.join(os.tmpdir(), "pdfly-data");
+    if (dir !== tmpDir) {
+      await fs.mkdir(tmpDir, { recursive: true });
+      await fs.writeFile(
+        path.join(tmpDir, "analytics.json"),
+        JSON.stringify(data, null, 2),
+        "utf-8",
+      );
+    } else {
+      console.error("Failed to write analytics file:", err);
+    }
+  }
 }
 
 /**
