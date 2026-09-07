@@ -6,6 +6,13 @@
       "lastSeen": "2026-09-04T10:42:48.512Z",
       "totalVisits": 2,
       "daysVisited": ["2026-09-04"]
+    },
+    "vis_mtrham15_7yydz5w8": {
+      "visitorId": "vis_mtrham15_7yydz5w8",
+      "firstSeen": "2026-09-07T16:52:13.640Z",
+      "lastSeen": "2026-09-07T16:52:13.640Z",
+      "totalVisits": 1,
+      "daysVisited": ["2026-09-07"]
     }
   },
   "visits": [
@@ -15,7 +22,14 @@
       "sessionId": "ses_mtmtctru_4mjb3o8l",
       "timestamp": "2026-09-04T10:31:01.805Z",
       "date": "2026-09-04"
+    },
+    {
+      "id": "vt_1788799933641_eq24a",
+      "visitorId": "vis_mtrham15_7yydz5w8",
+      "sessionId": "ses_mtrham15_j971eary",
+      "timestamp": "2026-09-07T16:52:13.640Z",
+      "date": "2026-09-07"
     }
   ],
-  "lastActivity": "2026-09-04T10:42:48.512Z"
+  "lastActivity": "2026-09-07T16:52:13.640Z"
 }

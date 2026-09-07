@@ -5,42 +5,49 @@ import viteReact from "@vitejs/plugin-react";
 import tsConfigPaths from "vite-tsconfig-paths";
 import { nitro } from "nitro/vite";
 
-export default defineConfig(({ command }) => ({
-  server: {
-    host: "0.0.0.0",
-    port: 3000,
-  },
-  resolve: {
-    alias: {
-      "@": "/src",
+export default defineConfig(({ command }) => {
+  if (command === "build") {
+    process.env.NODE_ENV = "production";
+  }
+
+  return {
+    server: {
+      host: "0.0.0.0",
+      port: 3000,
+      allowedHosts: true,
     },
-    dedupe: [
-      "react",
-      "react-dom",
-      "react/jsx-runtime",
-      "react/jsx-dev-runtime",
-      "@tanstack/react-query",
-      "@tanstack/query-core",
+    resolve: {
+      alias: {
+        "@": "/src",
+      },
+      dedupe: [
+        "react",
+        "react-dom",
+        "react/jsx-runtime",
+        "react/jsx-dev-runtime",
+        "@tanstack/react-query",
+        "@tanstack/query-core",
+      ],
+    },
+    plugins: [
+      tailwindcss(),
+      tsConfigPaths({ projects: ["./tsconfig.json"] }),
+      tanstackStart({
+        server: { entry: "server" },
+      }),
+      ...(command === "build"
+        ? [
+            nitro({
+              host: "0.0.0.0",
+              output: {
+                dir: "dist",
+                publicDir: "dist/public",
+                serverDir: "dist/server",
+              },
+            }),
+          ]
+        : []),
+      viteReact(),
     ],
-  },
-  plugins: [
-    tailwindcss(),
-    tsConfigPaths({ projects: ["./tsconfig.json"] }),
-    tanstackStart({
-      server: { entry: "server" },
-    }),
-    ...(command === "build"
-      ? [
-          nitro({
-            host: "0.0.0.0",
-            output: {
-              dir: "dist",
-              publicDir: "dist/public",
-              serverDir: "dist/server",
-            },
-          }),
-        ]
-      : []),
-    viteReact(),
-  ],
-}));
+  };
+});
