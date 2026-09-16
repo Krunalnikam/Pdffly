@@ -1,6 +1,26 @@
 import { StudentProfile } from "@/types";
+import { saveStudentProfileServerFn } from "@/lib/student-profiles-server";
 
 export const STUDENT_PROFILE_STORAGE_KEY = "pdfmaker_student_profile";
+
+/**
+ * Synchronizes student profile to the backend store asynchronously.
+ * Safely ignores errors if offline or network unavailable.
+ */
+export async function syncProfileToServer(profile: StudentProfile): Promise<void> {
+  if (!profile || !profile.enrollmentNumber || !profile.branch) return;
+  try {
+    await saveStudentProfileServerFn({
+      data: {
+        enrollmentNumber: profile.enrollmentNumber.trim(),
+        branch: profile.branch.trim().toUpperCase(),
+      },
+    });
+  } catch (err) {
+    // Non-blocking background sync failure
+    console.warn("Could not sync student profile to server:", err);
+  }
+}
 
 /**
  * Retrieves the saved student profile from localStorage.
@@ -32,7 +52,7 @@ export function getSavedProfile(): StudentProfile | null {
 }
 
 /**
- * Saves or updates the student profile in localStorage.
+ * Saves or updates the student profile in localStorage and syncs to backend.
  */
 export function saveStudentProfile(profile: StudentProfile): StudentProfile {
   const cleanProfile: StudentProfile = {
@@ -41,7 +61,16 @@ export function saveStudentProfile(profile: StudentProfile): StudentProfile {
   };
   if (typeof window !== "undefined") {
     localStorage.setItem(STUDENT_PROFILE_STORAGE_KEY, JSON.stringify(cleanProfile));
+    try {
+      window.dispatchEvent(new CustomEvent("pdfly:profile-saved", { detail: cleanProfile }));
+    } catch {
+      // ignore
+    }
   }
+
+  // Sync to database in background
+  syncProfileToServer(cleanProfile);
+
   return cleanProfile;
 }
 

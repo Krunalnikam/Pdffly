@@ -10,6 +10,7 @@ import {
   Crop,
   Edit3,
   FileDown,
+  Globe,
   GraduationCap,
   Hash,
   ImagePlus,
@@ -23,6 +24,7 @@ import {
   Undo2,
   UserCheck,
   Wand2,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +35,8 @@ import { Switch } from "@/components/ui/switch";
 import {
   formatBytes,
   generateAssignmentPdf,
+  preloadJsPdf,
+  createThumbnail,
   QUALITY_PRESETS,
   type PdfQualityPreset,
   type UploadedImage,
@@ -52,8 +56,11 @@ import { DocumentScannerModal } from "@/components/DocumentScannerModal";
 import { ProfileEditModal } from "@/components/ProfileEditModal";
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { AdminFeedbackModal } from "@/components/AdminFeedbackModal";
+import { SubmissionDetailsModal } from "@/components/SubmissionDetailsModal";
 import { SettingsMenu } from "@/components/SettingsMenu";
-import { getSavedProfile, saveStudentProfile } from "@/lib/profile";
+import { StudentResourcesModal } from "@/components/StudentResourcesModal";
+import { LiveStudentsIndicator } from "@/components/LiveStudentsIndicator";
+import { getSavedProfile, saveStudentProfile, syncProfileToServer } from "@/lib/profile";
 import { StudentProfile } from "@/types";
 import { useLanguage } from "@/lib/i18n";
 import { getSiteUrl } from "@/lib/site-url";
@@ -78,9 +85,26 @@ export const Route = createFileRoute("/")({
           content:
             "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF.",
         },
+        { property: "og:type", content: "website" },
         { property: "og:url", content: pageUrl },
         { property: "og:image", content: ogJpg },
         { property: "og:image:secure_url", content: ogJpg },
+        { property: "og:image:type", content: "image/jpeg" },
+        { property: "og:image:width", content: "1200" },
+        { property: "og:image:height", content: "800" },
+        {
+          property: "og:image:alt",
+          content: "Assignment PDF Maker — Smart Document Scanner & Submission Generator",
+        },
+        { name: "twitter:card", content: "summary_large_image" },
+        { name: "twitter:title", content: "Assignment PDF Maker — Photos to Submission PDF" },
+        {
+          name: "twitter:description",
+          content:
+            "Upload assignment photos, auto-detect document borders, perspective crop, and download a submission-ready PDF.",
+        },
+        { name: "twitter:image", content: ogJpg },
+        { name: "twitter:url", content: pageUrl },
       ],
     };
   },
@@ -96,7 +120,11 @@ function Index() {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [studentResourcesModalOpen, setStudentResourcesModalOpen] = useState(false);
   const [adminFeedbackModalOpen, setAdminFeedbackModalOpen] = useState(false);
+  const [adminInitialTab, setAdminInitialTab] = useState<"analytics" | "feedback" | "promotions">(
+    "analytics",
+  );
   const [branchInput, setBranchInput] = useState("");
   const [enrollmentInput, setEnrollmentInput] = useState("");
   const [subject, setSubject] = useState("");
@@ -124,7 +152,9 @@ function Index() {
     originalSize?: number;
     pageCount: number;
     blob?: Blob;
+    generationTimeMs?: number;
   } | null>(null);
+  const [quickDetailsModalOpen, setQuickDetailsModalOpen] = useState(false);
   const [notices, setNotices] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const createdBlobUrlsRef = useRef<Set<string>>(new Set());
@@ -186,13 +216,14 @@ function Index() {
     }
   };
 
-  // Load saved student profile from localStorage on mount
+  // Load saved student profile from localStorage on mount and sync to backend
   useEffect(() => {
     const saved = getSavedProfile();
     if (saved) {
       setProfile(saved);
       setBranchInput(saved.branch);
       setEnrollmentInput(saved.enrollmentNumber);
+      syncProfileToServer(saved);
     }
   }, []);
 
@@ -234,6 +265,9 @@ function Index() {
     );
     if (accepted.length === 0) return;
 
+    // Preload jsPDF module into browser memory in background as soon as files are chosen
+    preloadJsPdf();
+
     // Map files in the exact sequence provided by the picker
     // Assign stable sequential IDs and preserve stable index positions
     const newImages: UploadedImage[] = accepted.map((file, idx) => {
@@ -247,11 +281,30 @@ function Index() {
         originalDataUrl: objectUrl,
         size: file.size,
         isCropped: false,
+        file,
+        blob: file,
       };
     });
 
-    // If Reverse Order is ON (default), reverse newly picked camera batch so (5,4,3,2,1) becomes (1,2,3,4,5)
-    const batchToAdd = isReverseOrder ? [...newImages].reverse() : newImages;
+    // Generate responsive lightweight thumbnails in background separately from full-res images
+    newImages.forEach(async (item) => {
+      try {
+        const thumb = await createThumbnail(item.file || item.dataUrl, 240);
+        if (thumb && thumb !== item.dataUrl) {
+          if (thumb.startsWith("blob:")) createdBlobUrlsRef.current.add(thumb);
+          setImages((prev) =>
+            prev.map((img) => (img.id === item.id ? { ...img, thumbnailUrl: thumb } : img)),
+          );
+        }
+      } catch {
+        // ignore
+      }
+    });
+
+    // UI OFF (!isReverseOrder) -> Actual Reverse ON (reverse newly picked camera batch)
+    // UI ON (isReverseOrder) -> Actual Reverse OFF (original order)
+    const isActualReverse = !isReverseOrder;
+    const batchToAdd = isActualReverse ? [...newImages].reverse() : newImages;
 
     // CRITICAL: Append the new batch strictly to the END of existing images (existing images are never re-reversed)
     setImages((prev) => [...prev, ...batchToAdd]);
@@ -284,6 +337,22 @@ function Index() {
             if (res.dataUrl.startsWith("blob:")) {
               createdBlobUrlsRef.current.add(res.dataUrl);
             }
+
+            // Generate thumbnail for cropped image in background
+            createThumbnail(res.blob || res.dataUrl, 240).then((thumb) => {
+              if (thumb && thumb.startsWith("blob:")) createdBlobUrlsRef.current.add(thumb);
+              setImages((prev) =>
+                prev.map((img) =>
+                  img.id === item.id
+                    ? {
+                        ...img,
+                        thumbnailUrl: thumb,
+                      }
+                    : img,
+                ),
+              );
+            });
+
             // Update in-place by matching exact image ID, guaranteeing order remains unchanged
             setImages((prev) =>
               prev.map((img) =>
@@ -294,6 +363,7 @@ function Index() {
                       isCropped: true,
                       currentQuad: res.quad,
                       confidence: res.confidence,
+                      blob: res.blob || img.blob,
                     }
                   : img,
               ),
@@ -305,7 +375,6 @@ function Index() {
           completed++;
           setBatchProgress(t("processingPage", { current: Math.min(completed, total), total }));
         }
-        await new Promise((r) => setTimeout(r, 0));
       }
     });
 
@@ -329,6 +398,14 @@ function Index() {
         try {
           URL.revokeObjectURL(target.originalDataUrl);
           createdBlobUrlsRef.current.delete(target.originalDataUrl);
+        } catch {
+          // ignore
+        }
+      }
+      if (target.thumbnailUrl && target.thumbnailUrl.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(target.thumbnailUrl);
+          createdBlobUrlsRef.current.delete(target.thumbnailUrl);
         } catch {
           // ignore
         }
@@ -478,6 +555,7 @@ function Index() {
                         isCropped: true,
                         currentQuad: res.quad,
                         confidence: res.confidence,
+                        blob: res.blob || img.blob,
                       }
                     : img,
                 ),
@@ -490,7 +568,6 @@ function Index() {
             completedCount++;
             setBatchProgress(t("processingPage", { current: completedCount, total }));
           }
-          await new Promise((r) => setTimeout(r, 0));
         }
       });
 
@@ -532,6 +609,9 @@ function Index() {
       setProfile(saved);
     }
 
+    // High-resolution real timing started exactly upon user clicking Generate PDF
+    const startTime = performance.now();
+
     setIsGenerating(true);
     setGenerationProgress({
       stage: "preparing",
@@ -555,6 +635,12 @@ function Index() {
           setGenerationProgress(progress);
         },
       );
+
+      // Stop timing only when the PDF is completely generated and ready
+      const endTime = performance.now();
+      const elapsedSec = ((endTime - startTime) / 1000).toFixed(2);
+      const elapsedMs = Math.round(endTime - startTime);
+
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -569,6 +655,7 @@ function Index() {
         originalSize: totalOriginalSize > 0 ? totalOriginalSize : undefined,
         pageCount: images.length,
         blob,
+        generationTimeMs: elapsedMs,
       });
       setGenerationProgress(null);
       notify(t("pdfCreatedNotify"));
@@ -640,21 +727,42 @@ function Index() {
       <div className="mx-auto max-w-5xl">
         <header className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-foreground">
-              {t("appTagline")}
-            </p>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-foreground">
+                {t("appTagline")}
+              </p>
+              <LiveStudentsIndicator />
+            </div>
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
               {t("appTitle")}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground sm:text-base">{t("appDescription")}</p>
           </div>
 
-          {/* Top Actions: [ Settings ] [ 💬 Feedback ] [ Saved Profile ] */}
+          {/* Top Actions: [ Settings ] [ 🌐 Student Resources ] [ 💬 Feedback ] [ Saved Profile ] */}
           <div className="shrink-0 flex items-center gap-2 flex-wrap sm:flex-nowrap">
             <SettingsMenu
               onOpenFeedback={() => setFeedbackModalOpen(true)}
-              onOpenAdminFeedback={() => setAdminFeedbackModalOpen(true)}
+              onOpenStudentResources={() => setStudentResourcesModalOpen(true)}
+              onOpenAdminFeedback={() => {
+                setAdminInitialTab("analytics");
+                setAdminFeedbackModalOpen(true);
+              }}
             />
+
+            <Button
+              id="btn-open-student-resources"
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setStudentResourcesModalOpen(true)}
+              className="h-9 gap-1.5 text-xs font-medium border-border/80 bg-card text-foreground hover:bg-accent/50 shadow-xs cursor-pointer"
+              title="Student Resources"
+              aria-label="Student Resources"
+            >
+              <Globe className="h-4 w-4 text-primary" />
+              <span>Student Resources</span>
+            </Button>
 
             <Button
               id="btn-open-feedback"
@@ -727,6 +835,23 @@ function Index() {
               <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3">
                 <CardTitle className="text-lg">{t("step1Title")}</CardTitle>
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Quick Submission Details Button */}
+                  <Button
+                    id="btn-quick-submission-details"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs font-semibold border-primary/40 bg-primary/5 text-primary hover:bg-primary/10 shadow-2xs transition-colors cursor-pointer"
+                    onClick={() => setQuickDetailsModalOpen(true)}
+                    title={t("quickSubmissionDesc")}
+                  >
+                    <GraduationCap className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span>{t("quickSubmissionDetails")}</span>
+                    {(Boolean(activeBranch) || Boolean(subject)) && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    )}
+                  </Button>
+
                   {/* Smart Filter ON/OFF Toggle */}
                   <div
                     id="toggle-smart-filter-container"
@@ -855,9 +980,10 @@ function Index() {
                           <div className="flex items-center gap-3">
                             <div className="relative flex h-14 w-12 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-secondary/40">
                               <img
-                                src={image.dataUrl}
+                                src={image.thumbnailUrl || image.dataUrl}
                                 alt={`Page ${index + 1}`}
                                 className="h-full w-full object-contain"
+                                loading="lazy"
                               />
                               <span className="absolute left-0.5 top-0.5 rounded bg-primary px-1 text-[9px] font-bold text-primary-foreground">
                                 {index + 1}
@@ -1032,7 +1158,7 @@ function Index() {
             </Card>
 
             {/* Step 2: Student & Exam details */}
-            <Card>
+            <Card id="section-submission-details" className="scroll-mt-6">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg flex items-center gap-2">
@@ -1346,9 +1472,11 @@ function Index() {
                         <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                         <span className="truncate">{getProgressLabel()}</span>
                       </div>
-                      <span className="font-mono text-primary font-bold text-xs shrink-0 ml-2">
-                        {generationProgress?.percent || 20}%
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0 ml-2 font-mono">
+                        <span className="text-primary font-bold text-xs">
+                          {generationProgress?.percent || 20}%
+                        </span>
+                      </div>
                     </div>
 
                     {/* Progress Track */}
@@ -1452,10 +1580,12 @@ function Index() {
 
                 {result && (
                   <div className="space-y-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4">
-                    <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                      {t("pdfReadyTitle")}
-                    </p>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                        {t("pdfReadyTitle")}
+                      </p>
+                    </div>
                     <p className="break-all text-xs font-medium text-foreground">
                       {result.fileName}
                     </p>
@@ -1527,13 +1657,44 @@ function Index() {
         onSave={handleSaveProfile}
       />
 
+      {/* Quick Submission Details Modal */}
+      <SubmissionDetailsModal
+        isOpen={quickDetailsModalOpen}
+        onClose={() => setQuickDetailsModalOpen(false)}
+        profile={profile}
+        onOpenProfileModal={() => setProfileModalOpen(true)}
+        onSaveProfile={handleSaveProfile}
+        branchInput={branchInput}
+        setBranchInput={setBranchInput}
+        enrollmentInput={enrollmentInput}
+        setEnrollmentInput={setEnrollmentInput}
+        subject={subject}
+        setSubject={setSubject}
+        examPhase={examPhase}
+        setExamPhase={setExamPhase}
+        errors={errors}
+        onScrollToSection={() => {
+          const el = document.getElementById("section-submission-details");
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        }}
+      />
+
       {/* Feedback Modal */}
       <FeedbackModal isOpen={feedbackModalOpen} onClose={() => setFeedbackModalOpen(false)} />
+
+      {/* Student Resources Modal */}
+      <StudentResourcesModal
+        isOpen={studentResourcesModalOpen}
+        onClose={() => setStudentResourcesModalOpen(false)}
+      />
 
       {/* Owner / Admin Feedback Dashboard Modal */}
       <AdminFeedbackModal
         isOpen={adminFeedbackModalOpen}
         onClose={() => setAdminFeedbackModalOpen(false)}
+        initialTab={adminInitialTab}
       />
     </main>
   );

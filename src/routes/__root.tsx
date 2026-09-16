@@ -110,7 +110,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         { property: "og:image:secure_url", content: ogJpg },
         { property: "og:image:type", content: "image/jpeg" },
         { property: "og:image:width", content: "1200" },
-        { property: "og:image:height", content: "630" },
+        { property: "og:image:height", content: "800" },
         {
           property: "og:image:alt",
           content: "Assignment PDF Maker — Smart Document Scanner & Submission Generator",
@@ -120,7 +120,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         { property: "og:image:secure_url", content: ogPng },
         { property: "og:image:type", content: "image/png" },
         { property: "og:image:width", content: "1200" },
-        { property: "og:image:height", content: "630" },
+        { property: "og:image:height", content: "800" },
         // Twitter Card Meta Tags
         { name: "twitter:card", content: "summary_large_image" },
         { name: "twitter:title", content: "Assignment PDF Maker — Photos to Submission PDF" },

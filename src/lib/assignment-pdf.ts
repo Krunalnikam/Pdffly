@@ -61,6 +61,8 @@ export type UploadedImage = {
     { x: number; y: number },
   ];
   confidence?: number;
+  file?: File | Blob;
+  thumbnailUrl?: string;
 };
 
 const sanitize = (value: string) =>
@@ -80,10 +82,51 @@ export const buildFileName = (d: StudentDetails) =>
 export const A4_PORTRAIT_WIDTH = 595.28;
 export const A4_PORTRAIT_HEIGHT = 841.89;
 
+// Preload jsPDF module in advance to eliminate any dynamic import pause during generation
+let jsPdfPromise: Promise<typeof import("jspdf")> | null = null;
+export function preloadJsPdf() {
+  if (!jsPdfPromise && typeof window !== "undefined") {
+    jsPdfPromise = import("jspdf");
+  }
+  return jsPdfPromise;
+}
+
+// Helper to safely convert base64 data URLs to Blob without relying on fetch()
+function dataUrlToBlob(dataUrl: string): Blob {
+  try {
+    const commaIdx = dataUrl.indexOf(",");
+    const header = commaIdx >= 0 ? dataUrl.slice(0, commaIdx) : "";
+    const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+    const mimeMatch = header.match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    const binary = atob(base64);
+    const len = binary.length;
+    const u8arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      u8arr[i] = binary.charCodeAt(i);
+    }
+    return new Blob([u8arr], { type: mime });
+  } catch {
+    return new Blob([], { type: "image/jpeg" });
+  }
+}
+
+// Cache for prepared page byte buffers to avoid re-encoding on consecutive runs
+const optimizedPageCache = new Map<
+  string,
+  { imageBytes: Uint8Array; width: number; height: number }
+>();
+
+export function clearOptimizedPageCache() {
+  optimizedPageCache.clear();
+}
+
+/**
+ * Efficiently decodes an image using createImageBitmap directly from Blob/File where possible.
+ */
 const decodeImage = async (
-  dataUrl: string,
+  image: UploadedImage,
   pageIndex: number,
-  imageName?: string,
 ): Promise<{
   naturalWidth: number;
   naturalHeight: number;
@@ -96,23 +139,37 @@ const decodeImage = async (
 }> => {
   if (typeof createImageBitmap === "function") {
     try {
-      const response = await fetch(dataUrl);
-      const blob = await response.blob();
-      const bitmap = await createImageBitmap(blob);
-      return {
-        naturalWidth: bitmap.width,
-        naturalHeight: bitmap.height,
-        draw: (ctx, w, h) => {
-          ctx.drawImage(bitmap, 0, 0, w, h);
-        },
-        cleanup: () => {
-          try {
-            bitmap.close();
-          } catch {
-            // ignore
-          }
-        },
-      };
+      let blob: Blob | null = null;
+      if (image.blob) {
+        blob = image.blob;
+      } else if (image.file) {
+        blob = image.file;
+      } else if (image.dataUrl.startsWith("data:")) {
+        blob = dataUrlToBlob(image.dataUrl);
+        image.blob = blob;
+      } else if (image.dataUrl.startsWith("blob:")) {
+        const response = await fetch(image.dataUrl);
+        blob = await response.blob();
+        image.blob = blob;
+      }
+
+      if (blob && blob.size > 0) {
+        const bitmap = await createImageBitmap(blob);
+        return {
+          naturalWidth: bitmap.width,
+          naturalHeight: bitmap.height,
+          draw: (ctx, w, h) => {
+            ctx.drawImage(bitmap, 0, 0, w, h);
+          },
+          cleanup: () => {
+            try {
+              bitmap.close();
+            } catch {
+              // ignore
+            }
+          },
+        };
+      }
     } catch {
       // Fall through to standard Image element
     }
@@ -120,6 +177,7 @@ const decodeImage = async (
 
   return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       resolve({
         naturalWidth: img.naturalWidth || img.width,
@@ -137,46 +195,56 @@ const decodeImage = async (
     img.onerror = () =>
       reject(
         new Error(
-          `Page ${pageIndex + 1} (${imageName || "Image"}) could not be read or decoded. Please verify the image file.`,
+          `Page ${pageIndex + 1} (${image.name || "Image"}) could not be read or decoded. Please verify the image file.`,
         ),
       );
-    img.src = dataUrl;
+    img.src = image.dataUrl;
   });
 };
 
 /**
- * Concurrently maps an array with a worker limit to optimize throughput
- * while preventing main-thread lockup and memory exhaustion.
- * Preserves strict input order in the returned array.
+ * Creates lightweight thumbnail separately from full-resolution image.
  */
-async function pMap<T, R>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>,
-  onItemCompleted?: (completedCount: number, total: number) => void,
-): Promise<R[]> {
-  const total = items.length;
-  const results = new Array<R>(total);
-  let currentIndex = 0;
-  let completedCount = 0;
-
-  const poolSize = Math.min(concurrency, total);
-  const workers = Array.from({ length: poolSize }, async () => {
-    while (true) {
-      const idx = currentIndex++;
-      if (idx >= total) break;
-      const item = items[idx]!;
-      const res = await mapper(item, idx);
-      results[idx] = res;
-      completedCount++;
-      onItemCompleted?.(completedCount, total);
-      // Brief micro-yield to keep UI frame rate smooth
-      await new Promise((resolve) => setTimeout(resolve, 0));
+export async function createThumbnail(source: Blob | string, maxDim = 240): Promise<string> {
+  try {
+    let blob: Blob;
+    if (typeof source === "string") {
+      if (source.startsWith("blob:")) {
+        const res = await fetch(source);
+        blob = await res.blob();
+      } else {
+        return source;
+      }
+    } else {
+      blob = source;
     }
-  });
 
-  await Promise.all(workers);
-  return results;
+    if (typeof createImageBitmap === "function") {
+      const bmp = await createImageBitmap(blob, {
+        resizeWidth: maxDim,
+        resizeQuality: "medium",
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(bmp, 0, 0);
+        bmp.close();
+        const thumbBlob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, "image/jpeg", 0.7),
+        );
+        canvas.width = 1;
+        canvas.height = 1;
+        if (thumbBlob) {
+          return URL.createObjectURL(thumbBlob);
+        }
+      }
+    }
+  } catch {
+    // Fall back to original
+  }
+  return typeof source === "string" ? source : URL.createObjectURL(source);
 }
 
 /**
@@ -197,7 +265,20 @@ const optimizeImageForPdf = async (
   width: number;
   height: number;
 }> => {
-  const decoded = await decodeImage(image.dataUrl, index, image.name);
+  const cacheKey = `${image.id}_${image.dataUrl}_${qualityPreset}_${enableSmartFilter}`;
+  if (optimizedPageCache.has(cacheKey)) {
+    const cached = optimizedPageCache.get(cacheKey);
+    if (cached && cached.imageBytes && cached.imageBytes.length > 0) {
+      return {
+        imageBytes: cached.imageBytes,
+        width: cached.width,
+        height: cached.height,
+      };
+    }
+    optimizedPageCache.delete(cacheKey);
+  }
+
+  const decoded = await decodeImage(image, index);
   try {
     const rawWidth = decoded.naturalWidth;
     const rawHeight = decoded.naturalHeight;
@@ -213,6 +294,8 @@ const optimizeImageForPdf = async (
     const targetWidth = Math.max(1, Math.round(rawWidth * scale));
     const targetHeight = Math.max(1, Math.round(rawHeight * scale));
 
+    let imageBytes: Uint8Array | null = null;
+
     // Prefer OffscreenCanvas for non-blocking canvas rendering if supported
     if (typeof OffscreenCanvas !== "undefined") {
       try {
@@ -220,10 +303,12 @@ const optimizeImageForPdf = async (
         const ctx = offCanvas.getContext("2d");
         if (ctx) {
           ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = "high";
+          ctx.imageSmoothingQuality = "medium";
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0, 0, targetWidth, targetHeight);
           decoded.draw(ctx, targetWidth, targetHeight);
+          // Release raw decoded image memory immediately to free RAM
+          decoded.cleanup();
 
           if (enableSmartFilter) {
             const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight);
@@ -236,63 +321,81 @@ const optimizeImageForPdf = async (
             quality: preset.jpegQuality,
           });
 
-          const arrayBuffer = await blob.arrayBuffer();
-          return {
-            imageBytes: new Uint8Array(arrayBuffer),
-            width: targetWidth,
-            height: targetHeight,
-          };
+          if (blob && blob.size > 0) {
+            const arrayBuffer = await blob.arrayBuffer();
+            const u8 = new Uint8Array(arrayBuffer);
+            if (u8.length > 0) {
+              imageBytes = u8;
+            }
+          }
         }
       } catch {
         // Fall back to standard DOM canvas
       }
     }
 
-    const canvas = document.createElement("canvas");
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
+    // Standard DOM canvas fallback if OffscreenCanvas did not complete
+    if (!imageBytes) {
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      throw new Error(`Page ${index + 1}: Canvas graphics context is unavailable.`);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error(`Page ${index + 1}: Canvas graphics context is unavailable.`);
+      }
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "medium";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, targetWidth, targetHeight);
+      decoded.draw(ctx, targetWidth, targetHeight);
+      // Release raw decoded image memory immediately
+      decoded.cleanup();
+
+      if (enableSmartFilter) {
+        const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight);
+        enhanceImageData(imgData);
+        ctx.putImageData(imgData, 0, 0);
+      }
+
+      let blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", preset.jpegQuality),
+      );
+
+      if (!blob || blob.size === 0) {
+        const dataUrl = canvas.toDataURL("image/jpeg", preset.jpegQuality);
+        if (dataUrl && dataUrl.length > 30) {
+          blob = dataUrlToBlob(dataUrl);
+        }
+      }
+
+      canvas.width = 1;
+      canvas.height = 1;
+
+      if (!blob || blob.size === 0) {
+        throw new Error(`Page ${index + 1}: Failed to encode image.`);
+      }
+
+      const arrayBuffer = await blob.arrayBuffer();
+      imageBytes = new Uint8Array(arrayBuffer);
     }
 
-    // Use high quality image smoothing to prevent jagged handwriting when downscaling
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-
-    // Fill pure white background to support transparent PNGs and preserve paper margins
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, targetWidth, targetHeight);
-
-    // Draw image precisely across canvas without any cropping, stretching, or padding
-    decoded.draw(ctx, targetWidth, targetHeight);
-
-    // Apply smart automatic document enhancement only if enabled (ON)
-    if (enableSmartFilter) {
-      const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight);
-      enhanceImageData(imgData);
-      ctx.putImageData(imgData, 0, 0);
+    if (!imageBytes || imageBytes.length === 0) {
+      throw new Error(`Page ${index + 1}: Encoded image buffer is empty.`);
     }
 
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", preset.jpegQuality),
-    );
-
-    // Release canvas dimensions to assist garbage collection
-    canvas.width = 1;
-    canvas.height = 1;
-
-    if (!blob) {
-      throw new Error(`Page ${index + 1}: Failed to encode image.`);
-    }
-
-    const arrayBuffer = await blob.arrayBuffer();
-    return {
-      imageBytes: new Uint8Array(arrayBuffer),
+    const result = {
+      imageBytes,
       width: targetWidth,
       height: targetHeight,
     };
+
+    if (optimizedPageCache.size < 60) {
+      optimizedPageCache.set(cacheKey, result);
+    }
+
+    return result;
   } finally {
     decoded.cleanup();
   }
@@ -309,6 +412,10 @@ export interface PdfGenerationProgress {
 
 export type ProgressCallback = (progress: PdfGenerationProgress) => void;
 
+/**
+ * Generates an assignment PDF with maximum possible speed and controlled concurrency.
+ * Preserves strict page order, quality modes, and memory stability on all devices.
+ */
 export async function generateAssignmentPdf(
   details: StudentDetails,
   images: UploadedImage[],
@@ -323,94 +430,111 @@ export async function generateAssignmentPdf(
 
   const total = validImages.length;
 
-  // 1. Preparing images & PDF engine
   onProgress?.({
     stage: "preparing",
     percent: 10,
     current: 0,
     total,
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
 
-  const { jsPDF } = await import("jspdf");
+  // Start jsPDF import concurrently
+  const jsPdfModulePromise = preloadJsPdf() || import("jspdf");
 
-  const concurrency =
-    typeof navigator !== "undefined" && navigator.hardwareConcurrency
-      ? Math.max(2, Math.min(3, Math.floor(navigator.hardwareConcurrency / 2)))
-      : 2;
+  // Controlled concurrency: 3 on mobile (safe and fast with instant memory release), 4-5 on desktop
+  const isMobile =
+    typeof navigator !== "undefined" &&
+    (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      (navigator.hardwareConcurrency ? navigator.hardwareConcurrency <= 4 : false));
 
-  // 2. Process first image to configure jsPDF dimensions
-  onProgress?.({
-    stage: "processing",
-    percent: 15,
-    current: 1,
-    total,
-  });
+  const concurrency = isMobile
+    ? 3
+    : typeof navigator !== "undefined" && navigator.hardwareConcurrency
+      ? Math.min(5, Math.max(3, Math.floor(navigator.hardwareConcurrency * 0.75)))
+      : 3;
 
-  const first = await optimizeImageForPdf(validImages[0]!, 0, enableSmartFilter, qualityPreset);
-  const firstOrientation = first.width > first.height ? "landscape" : "portrait";
+  const { jsPDF } = await jsPdfModulePromise;
 
-  const doc = new jsPDF({
-    unit: "pt",
-    format: [first.width, first.height],
-    orientation: firstOrientation,
-    compress: true,
-  });
+  let doc: InstanceType<typeof jsPDF> | null = null;
+  let nextPageToAdd = 0;
+  const completedPages = new Map<
+    number,
+    { imageBytes: Uint8Array; width: number; height: number }
+  >();
 
-  // Set document metadata
-  doc.setProperties({
-    title: buildFileName(details).replace(/\.pdf$/i, ""),
-    subject: details.subject || undefined,
-    author: details.enrollmentNumber
-      ? `${details.enrollmentNumber}${details.branch ? ` (${details.branch})` : ""}`
-      : undefined,
-    creator: "Krunal Nikam",
-  });
+  const drainCompletedPages = () => {
+    while (completedPages.has(nextPageToAdd)) {
+      const page = completedPages.get(nextPageToAdd)!;
+      completedPages.delete(nextPageToAdd);
 
-  // Render the first image filling the entire page without margins or letterboxing
-  doc.addImage(first.imageBytes, "JPEG", 0, 0, first.width, first.height, undefined, "FAST");
+      if (!page || !page.imageBytes || page.imageBytes.length === 0) {
+        throw new Error(`Page ${nextPageToAdd + 1}: Image data could not be rendered for PDF.`);
+      }
 
-  // 3. Process and stream subsequent images in bounded batches so memory is freed progressively
-  for (let i = 1; i < total; i += concurrency) {
-    const chunk = validImages.slice(i, i + concurrency);
-    const chunkResults = await Promise.all(
-      chunk.map((item, relIdx) =>
-        optimizeImageForPdf(item, i + relIdx, enableSmartFilter, qualityPreset),
-      ),
-    );
+      const orientation = page.width > page.height ? "landscape" : "portrait";
+      if (nextPageToAdd === 0) {
+        doc = new jsPDF({
+          unit: "pt",
+          format: [page.width, page.height],
+          orientation,
+          compress: false, // JPEGs are already compressed; prevents slow single-threaded JS Deflate passes
+        });
 
-    for (let c = 0; c < chunkResults.length; c++) {
-      const pageIndex = i + c;
-      const { imageBytes, width, height } = chunkResults[c]!;
-      const orientation = width > height ? "landscape" : "portrait";
-      doc.addPage([width, height], orientation);
-      doc.addImage(imageBytes, "JPEG", 0, 0, width, height, undefined, "FAST");
+        doc.setProperties({
+          title: buildFileName(details).replace(/\.pdf$/i, ""),
+          subject: details.subject || undefined,
+          author: details.enrollmentNumber
+            ? `${details.enrollmentNumber}${details.branch ? ` (${details.branch})` : ""}`
+            : undefined,
+          creator: "Krunal Nikam",
+        });
 
-      const pagePercent = Math.min(90, Math.round(15 + ((pageIndex + 1) / total) * 75));
+        doc.addImage(page.imageBytes, "JPEG", 0, 0, page.width, page.height, undefined, "FAST");
+      } else if (doc) {
+        doc.addPage([page.width, page.height], orientation);
+        doc.addImage(page.imageBytes, "JPEG", 0, 0, page.width, page.height, undefined, "FAST");
+      }
+
+      nextPageToAdd++;
+      const percent = Math.min(95, Math.round(15 + (nextPageToAdd / total) * 75));
       onProgress?.({
         stage: "processing",
-        percent: pagePercent,
-        current: pageIndex + 1,
+        percent,
+        current: nextPageToAdd,
         total,
       });
     }
+  };
 
-    // Yield to the event loop between batches for responsive UI and garbage collection
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  // Process images concurrently with strict order preserved in PDF assembly
+  let workerIndex = 0;
+  const poolSize = Math.min(concurrency, total);
+
+  const workers = Array.from({ length: poolSize }, async () => {
+    while (workerIndex < total) {
+      const idx = workerIndex++;
+      const item = validImages[idx]!;
+      const optimized = await optimizeImageForPdf(item, idx, enableSmartFilter, qualityPreset);
+      completedPages.set(idx, optimized);
+      drainCompletedPages();
+    }
+  });
+
+  await Promise.all(workers);
+  drainCompletedPages();
+
+  if (!doc) {
+    throw new Error("PDF document could not be assembled.");
   }
 
-  // 4. Compressing and Finalizing
   onProgress?.({
     stage: "finalizing",
-    percent: 95,
+    percent: 98,
     current: total,
     total,
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
 
   const blob = doc.output("blob");
 
-  // 5. Ready
   onProgress?.({
     stage: "ready",
     percent: 100,

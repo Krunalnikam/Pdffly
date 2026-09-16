@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   BarChart3,
   MessageSquareQuote,
+  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,7 @@ import {
 } from "@/lib/feedback-server";
 import { getAdminAnalyticsServerFn, type AnalyticsSummary } from "@/lib/analytics-server";
 import { AdminAnalyticsView } from "@/components/AdminAnalyticsView";
+import { AdminPromotionsManager } from "@/components/AdminPromotionsManager";
 
 export const Route = createFileRoute("/admin")({
   component: AdminDashboardPage,
@@ -47,7 +49,7 @@ const ADMIN_STORAGE_KEY = "pdfmaker_admin_passkey";
 function AdminDashboardPage() {
   const { t } = useLanguage();
 
-  const [activeTab, setActiveTab] = useState<"analytics" | "feedback">("analytics");
+  const [activeTab, setActiveTab] = useState<"analytics" | "feedback" | "promotions">("analytics");
   const [passkeyInput, setPasskeyInput] = useState("");
   const [activePasskey, setActivePasskey] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -404,12 +406,30 @@ function AdminDashboardPage() {
                   </span>
                 )}
               </button>
+
+              <button
+                type="button"
+                id="tab-admin-promotions"
+                onClick={() => setActiveTab("promotions")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  activeTab === "promotions"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                }`}
+              >
+                <Globe className="h-4 w-4" />
+                <span>Promotions & Websites</span>
+              </button>
             </div>
 
             {/* Tab 1: Website Analytics */}
             {activeTab === "analytics" ? (
-              <AdminAnalyticsView analytics={analytics} isLoading={isLoadingAnalytics} />
-            ) : (
+              <AdminAnalyticsView
+                analytics={analytics}
+                isLoading={isLoadingAnalytics}
+                adminKey={activePasskey}
+              />
+            ) : activeTab === "feedback" ? (
               /* Tab 2: Feedback */
               <div className="space-y-6">
                 {/* Stats Bar */}
@@ -595,6 +615,9 @@ function AdminDashboardPage() {
                   </div>
                 )}
               </div>
+            ) : (
+              /* Tab 3: Promotions & Websites */
+              <AdminPromotionsManager adminKey={activePasskey || ""} />
             )}
           </div>
         )}

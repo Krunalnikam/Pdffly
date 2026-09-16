@@ -52,6 +52,7 @@ export const translations = {
     editProfile: "Edit",
     editProfileTitle: "Edit Branch & Enrollment Number",
     profileActive: "Profile Active",
+    liveStudentsUsing: "{count} students are currently using PDFly",
 
     // Step 1: Upload Photos
     step1Title: "1. Upload assignment photos",
@@ -82,6 +83,9 @@ export const translations = {
 
     // Step 2: Submission Details
     step2Title: "2. Submission details",
+    quickSubmissionDetails: "Submission Details",
+    quickSubmissionDesc: "Quick access to your student profile and exam submission details",
+    jumpToFullSection: "Jump to section on page",
     step2DescSaved:
       "Your Branch and Enrollment Number are saved on this browser. Just enter the Subject and Exam Phase.",
     step2DescNew:
@@ -100,7 +104,7 @@ export const translations = {
     saveDetailsFuture: "Save Details for Future",
     subjectRequired: "Subject *",
     subjectPlaceholder: "e.g. DS",
-    subjectExample: "Example: DS, Java-2, TOC, DCN",
+    subjectExample: "Example: DS, Java, Python, FSD, DBMS",
     examPhaseRequired: "Exam Phase *",
     examPhasePlaceholder: "e.g. T1",
     examPhaseExample: "Example: T1, T2, T3, Assignment-1",
@@ -248,6 +252,7 @@ export const translations = {
       "Owner Protected: Only authorized administrators can view feedback submissions and analytics.",
     adminTabAnalytics: "Website Analytics",
     adminTabFeedback: "Student Feedback",
+    adminTabPromotions: "Promotions",
     analyticsTotalUsers: "Total Users",
     analyticsTotalVisits: "Total Visits",
     analyticsTodayUsers: "Today's Users",
@@ -281,6 +286,7 @@ export const translations = {
     editProfile: "बदलें",
     editProfileTitle: "ब्रांच और एनरोलमेंट नंबर बदलें",
     profileActive: "प्रोफ़ाइल सक्रिय",
+    liveStudentsUsing: "वर्तमान में {count} विद्यार्थी PDFly का उपयोग कर रहे हैं",
 
     // Step 1: Upload Photos
     step1Title: "1. असाइनमेंट फोटो अपलोड करें",
@@ -311,6 +317,9 @@ export const translations = {
 
     // Step 2: Submission Details
     step2Title: "2. सबमिशन विवरण",
+    quickSubmissionDetails: "सबमिशन विवरण",
+    quickSubmissionDesc: "अपनी विद्यार्थी प्रोफ़ाइल और परीक्षा सबमिशन विवरण तक त्वरित पहुंच",
+    jumpToFullSection: "पेज पर विवरण सेक्शन पर जाएं",
     step2DescSaved:
       "आपकी ब्रांच और एनरोलमेंट नंबर इस ब्राउज़र में सुरक्षित हैं। बस विषय और परीक्षा चरण दर्ज करें।",
     step2DescNew:
@@ -329,7 +338,7 @@ export const translations = {
     saveDetailsFuture: "भविष्य के लिए विवरण सुरक्षित करें",
     subjectRequired: "विषय *",
     subjectPlaceholder: "उदा. DS",
-    subjectExample: "उदाहरण: DS, Java-2, TOC, DCN",
+    subjectExample: "उदाहरण: DS, Java, Python, FSD, DBMS",
     examPhaseRequired: "परीक्षा चरण *",
     examPhasePlaceholder: "उदा. T1",
     examPhaseExample: "उदाहरण: T1, T2, T3, Assignment-1",
@@ -478,6 +487,7 @@ export const translations = {
       "सुरक्षित पोर्टल: केवल अधिकृत एडमिन ही प्रतिक्रियाएँ और एनालिटिक्स देख सकते हैं।",
     adminTabAnalytics: "वेबसाइट एनालिटिक्स",
     adminTabFeedback: "छात्र प्रतिक्रियाएँ",
+    adminTabPromotions: "प्रमोशन्स",
     analyticsTotalUsers: "कुल उपयोगकर्ता",
     analyticsTotalVisits: "कुल विज़िट",
     analyticsTodayUsers: "आज के उपयोगकर्ता",
@@ -511,6 +521,7 @@ export const translations = {
     editProfile: "બદલો",
     editProfileTitle: "બ્રાન્ચ અને એનરોલમેન્ટ નંબર બદલો",
     profileActive: "પ્રોફાઇલ સક્રિય",
+    liveStudentsUsing: "હાલમાં {count} વિદ્યાર્થીઓ PDFly નો ઉપયોગ કરી રહ્યા છે",
 
     // Step 1: Upload Photos
     step1Title: "1. અસાઇનમેન્ટ ફોટા અપલોડ કરો",
@@ -541,6 +552,9 @@ export const translations = {
 
     // Step 2: Submission Details
     step2Title: "2. સબમિશન વિગતો",
+    quickSubmissionDetails: "સબમિશન વિગતો",
+    quickSubmissionDesc: "તમારી વિદ્યાર્થી પ્રોફાઇલ અને પરીક્ષા સબમિશન વિગતોની ઝડપી ઍક્સેસ",
+    jumpToFullSection: "પેજ પર વિગતો વિભાગ પર જાઓ",
     step2DescSaved:
       "તમારી બ્રાન્ચ અને એનરોલમેન્ટ નંબર આ બ્રાઉઝરમાં સેવ છે. માત્ર વિષય અને પરીક્ષા ફેઝ દાખલ કરો.",
     step2DescNew:
@@ -559,7 +573,7 @@ export const translations = {
     saveDetailsFuture: "ભવિષ્ય માટે વિગતો સેવ કરો",
     subjectRequired: "વિષય *",
     subjectPlaceholder: "દા.ત. DS",
-    subjectExample: "ઉદાહરણ: DS, Java-2, TOC, DCN",
+    subjectExample: "ઉદાહરણ: DS, Java, Python, FSD, DBMS",
     examPhaseRequired: "પરીક્ષા ફેઝ *",
     examPhasePlaceholder: "દા.ત. T1",
     examPhaseExample: "ઉદાહરણ: T1, T2, T3, Assignment-1",
@@ -706,6 +720,7 @@ export const translations = {
       "સુરક્ષિત પોર્ટલ: માત્ર અધિકૃત એડમિનિસ્ટ્રેટર જ પ્રતિસાદ અને એનાલિટિક્સ જોઈ શકે છે.",
     adminTabAnalytics: "વેબસાઇટ એનાલિટિક્સ",
     adminTabFeedback: "વિદ્યાર્થી પ્રતિસાદ",
+    adminTabPromotions: "પ્રમોશન્સ",
     analyticsTotalUsers: "કુલ વપરાશકર્તાઓ",
     analyticsTotalVisits: "કુલ મુલાકાતો",
     analyticsTodayUsers: "આજના વપરાશકર્તાઓ",

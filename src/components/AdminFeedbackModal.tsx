@@ -20,6 +20,7 @@ import {
   Languages,
   BarChart3,
   MessageSquareQuote,
+  Globe,
 } from "lucide-react";
 import {
   Dialog,
@@ -42,18 +43,31 @@ import {
 } from "@/lib/feedback-server";
 import { getAdminAnalyticsServerFn, type AnalyticsSummary } from "@/lib/analytics-server";
 import { AdminAnalyticsView } from "@/components/AdminAnalyticsView";
+import { AdminPromotionsManager } from "@/components/AdminPromotionsManager";
 
 interface AdminFeedbackModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: "analytics" | "feedback" | "promotions";
 }
 
 const ADMIN_STORAGE_KEY = "pdfmaker_admin_passkey";
 
-export function AdminFeedbackModal({ isOpen, onClose }: AdminFeedbackModalProps) {
+export function AdminFeedbackModal({
+  isOpen,
+  onClose,
+  initialTab = "analytics",
+}: AdminFeedbackModalProps) {
   const { t } = useLanguage();
 
-  const [activeTab, setActiveTab] = useState<"analytics" | "feedback">("analytics");
+  const [activeTab, setActiveTab] = useState<"analytics" | "feedback" | "promotions">(initialTab);
+
+  useEffect(() => {
+    if (initialTab && isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, isOpen]);
+
   const [passkeyInput, setPasskeyInput] = useState("");
   const [activePasskey, setActivePasskey] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -413,13 +427,33 @@ export function AdminFeedbackModal({ isOpen, onClose }: AdminFeedbackModalProps)
                     </span>
                   )}
                 </button>
+
+                <button
+                  type="button"
+                  id="tab-admin-promotions"
+                  onClick={() => setActiveTab("promotions")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    activeTab === "promotions"
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  }`}
+                >
+                  <Globe className="h-4 w-4" />
+                  <span>{t("adminTabPromotions")}</span>
+                </button>
               </div>
 
               {/* Tab 1: Website User Analytics */}
-              {activeTab === "analytics" ? (
-                <AdminAnalyticsView analytics={analytics} isLoading={isLoadingAnalytics} />
-              ) : (
-                /* Tab 2: Student Feedback */
+              {activeTab === "analytics" && (
+                <AdminAnalyticsView
+                  analytics={analytics}
+                  isLoading={isLoadingAnalytics}
+                  adminKey={activePasskey}
+                />
+              )}
+
+              {/* Tab 2: Student Feedback */}
+              {activeTab === "feedback" && (
                 <div className="space-y-5">
                   {/* Stats Bar */}
                   {stats && (
@@ -599,6 +633,11 @@ export function AdminFeedbackModal({ isOpen, onClose }: AdminFeedbackModalProps)
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Tab 3: Promoted Websites */}
+              {activeTab === "promotions" && activePasskey && (
+                <AdminPromotionsManager adminKey={activePasskey} />
               )}
             </div>
           )}

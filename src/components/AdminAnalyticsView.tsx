@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Users,
   Eye,
@@ -9,21 +9,147 @@ import {
   Sparkles,
   CalendarDays,
   CalendarRange,
+  GraduationCap,
+  RefreshCw,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useLanguage } from "@/lib/i18n";
 import type { AnalyticsSummary, ActivityBucket } from "@/lib/analytics-server";
+import { getSavedStudentProfilesServerFn } from "@/lib/student-profiles-server";
+import type { SavedStudentProfileRecord } from "@/types";
 
 interface AdminAnalyticsViewProps {
   analytics: AnalyticsSummary | null;
   isLoading: boolean;
+  adminKey?: string | null;
 }
 
-export function AdminAnalyticsView({ analytics, isLoading }: AdminAnalyticsViewProps) {
+export function AdminAnalyticsView({ analytics, isLoading, adminKey }: AdminAnalyticsViewProps) {
   const { t } = useLanguage();
   const [timeRange, setTimeRange] = useState<"daily" | "weekly" | "monthly">("daily");
   const [hoveredBucket, setHoveredBucket] = useState<ActivityBucket | null>(null);
+
+  // Student Profiles State
+  const [profiles, setProfiles] = useState<SavedStudentProfileRecord[]>([]);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const effectiveAdminKey =
+    adminKey ||
+    (typeof window !== "undefined" ? sessionStorage.getItem("pdfmaker_admin_passkey") : null);
+
+  const loadProfiles = useCallback(
+    async (showSpinner = true) => {
+      if (!effectiveAdminKey) return;
+      if (showSpinner) {
+        setIsLoadingProfiles(true);
+      }
+      setProfilesError(null);
+      try {
+        const res = await getSavedStudentProfilesServerFn({
+          data: { adminKey: effectiveAdminKey },
+        });
+        if (res && res.success) {
+          setProfiles(res.profiles);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to load saved student profiles";
+        setProfilesError(msg);
+      } finally {
+        if (showSpinner) {
+          setIsLoadingProfiles(false);
+        }
+      }
+    },
+    [effectiveAdminKey],
+  );
+
+  // Load and poll automatically
+  useEffect(() => {
+    loadProfiles(true);
+
+    // Auto-update polling every 10 seconds while admin is viewing
+    const interval = setInterval(() => {
+      loadProfiles(false);
+    }, 10000);
+
+    // Listen to profile saved events in this or other tabs
+    const handleProfileSaved = () => {
+      loadProfiles(false);
+    };
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "pdfmaker_student_profile") {
+        loadProfiles(false);
+      }
+    };
+
+    window.addEventListener("pdfly:profile-saved", handleProfileSaved);
+    window.addEventListener("storage", handleStorageChange);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loadProfiles(false);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("pdfly:profile-saved", handleProfileSaved);
+      window.removeEventListener("storage", handleStorageChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [loadProfiles]);
+
+  const filteredProfiles = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return profiles;
+    return profiles.filter(
+      (p) => p.enrollmentNumber.toLowerCase().includes(q) || p.branch.toLowerCase().includes(q),
+    );
+  }, [profiles, searchQuery]);
+
+  const formatDateTime = (iso: string) => {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  const getRelativeTime = (iso: string) => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      const diffMs = Date.now() - d.getTime();
+      if (diffMs < 0) return "Just now";
+      const diffMins = Math.floor(diffMs / (60 * 1000));
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffMins < 1) return "Just now";
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays === 1) return "Yesterday";
+      if (diffDays < 30) return `${diffDays}d ago`;
+      return "";
+    } catch {
+      return "";
+    }
+  };
 
   if (isLoading && !analytics) {
     return (
@@ -304,6 +430,166 @@ export function AdminAnalyticsView({ analytics, isLoading }: AdminAnalyticsViewP
             })}
           </div>
         </div>
+      </div>
+
+      {/* Saved Student Profiles Section */}
+      <div
+        id="section-saved-student-profiles"
+        className="p-5 rounded-2xl border border-border bg-card shadow-xs space-y-4"
+      >
+        {/* Section Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/70">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <GraduationCap className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-foreground">Saved Student Profiles</h3>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] bg-primary/10 text-primary border-primary/25 font-semibold py-0 h-4"
+                >
+                  {profiles.length} {profiles.length === 1 ? "student" : "students"}
+                </Badge>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Live list of students who have saved their Enrollment Number & Branch profile
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {profiles.length > 0 && (
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  id="input-search-student-profiles"
+                  type="text"
+                  placeholder="Search enrollment or branch..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-8 pl-8 pr-2.5 text-xs w-44 sm:w-56 bg-secondary/40 border-border/70 rounded-lg"
+                />
+              </div>
+            )}
+
+            <Button
+              id="btn-refresh-student-profiles"
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => loadProfiles(true)}
+              disabled={isLoadingProfiles}
+              className="h-8 px-2.5 text-xs gap-1 border-border/80 text-muted-foreground hover:text-foreground"
+              title="Refresh student profiles list"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isLoadingProfiles ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Section Body */}
+        {isLoadingProfiles && profiles.length === 0 ? (
+          <div className="py-8 flex flex-col items-center justify-center text-center space-y-2 text-muted-foreground">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <span className="text-xs">Loading saved student profiles...</span>
+          </div>
+        ) : profilesError ? (
+          <div className="p-3 rounded-xl bg-destructive/10 text-destructive border border-destructive/20 text-xs flex items-center justify-between">
+            <span>{profilesError}</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => loadProfiles(true)}
+              className="h-7 text-xs"
+            >
+              Retry
+            </Button>
+          </div>
+        ) : filteredProfiles.length === 0 ? (
+          searchQuery ? (
+            <div className="py-8 text-center text-xs text-muted-foreground">
+              No student profiles matching &quot;{searchQuery}&quot;
+            </div>
+          ) : (
+            <div className="py-8 flex flex-col items-center justify-center text-center space-y-2 text-muted-foreground border border-dashed rounded-xl border-border bg-card/40">
+              <GraduationCap className="h-8 w-8 text-muted-foreground/30" />
+              <p className="text-xs font-medium text-foreground">No Saved Student Profiles Yet</p>
+              <p className="text-[11px] text-muted-foreground max-w-sm">
+                When a student saves their Enrollment Number and Branch, their profile record will
+                automatically appear here.
+              </p>
+            </div>
+          )
+        ) : (
+          <div className="space-y-2">
+            <div className="overflow-x-auto max-h-80 overflow-y-auto rounded-xl border border-border/70">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="sticky top-0 bg-secondary/90 backdrop-blur-xs z-10 border-b border-border text-muted-foreground">
+                  <tr>
+                    <th className="py-2.5 px-3.5 font-semibold uppercase text-[10px] tracking-wider">
+                      Enrollment Number
+                    </th>
+                    <th className="py-2.5 px-3.5 font-semibold uppercase text-[10px] tracking-wider">
+                      Branch
+                    </th>
+                    <th className="py-2.5 px-3.5 font-semibold uppercase text-[10px] tracking-wider">
+                      Profile Saved Date/Time
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {filteredProfiles.map((item) => (
+                    <tr
+                      key={item.enrollmentNumber}
+                      className="hover:bg-secondary/30 transition-colors"
+                    >
+                      <td className="py-2.5 px-3.5 font-mono font-bold text-foreground text-xs sm:text-sm">
+                        {item.enrollmentNumber}
+                      </td>
+                      <td className="py-2.5 px-3.5">
+                        <Badge
+                          variant="outline"
+                          className="text-[11px] font-semibold bg-secondary/80 text-foreground border-border/80 uppercase py-0.5"
+                        >
+                          {item.branch}
+                        </Badge>
+                      </td>
+                      <td className="py-2.5 px-3.5">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-foreground text-xs">
+                            {formatDateTime(item.savedAt)}
+                          </span>
+                          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                            <span>{getRelativeTime(item.savedAt)}</span>
+                            {item.updatedAt && item.updatedAt !== item.savedAt && (
+                              <span className="text-muted-foreground/80">
+                                • Updated {getRelativeTime(item.updatedAt)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1 pt-1">
+              <span>
+                Showing {filteredProfiles.length} of {profiles.length}{" "}
+                {profiles.length === 1 ? "student profile" : "student profiles"}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live sync active
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

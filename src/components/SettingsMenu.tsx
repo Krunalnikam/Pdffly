@@ -7,6 +7,7 @@ import {
   Check,
   MessageSquareQuote,
   ShieldCheck,
+  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,10 +24,15 @@ import { useLanguage, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 
 interface SettingsMenuProps {
   onOpenFeedback?: () => void;
+  onOpenStudentResources?: () => void;
   onOpenAdminFeedback?: () => void;
 }
 
-export function SettingsMenu({ onOpenFeedback, onOpenAdminFeedback }: SettingsMenuProps) {
+export function SettingsMenu({
+  onOpenFeedback,
+  onOpenStudentResources,
+  onOpenAdminFeedback,
+}: SettingsMenuProps) {
   const { theme, setTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
 
@@ -142,6 +148,17 @@ export function SettingsMenu({ onOpenFeedback, onOpenAdminFeedback }: SettingsMe
               <span>💬 {t("feedbackBtn")}</span>
             </DropdownMenuItem>
           </>
+        )}
+
+        {onOpenStudentResources && (
+          <DropdownMenuItem
+            id="btn-settings-open-student-resources"
+            onClick={onOpenStudentResources}
+            className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs cursor-pointer text-foreground hover:bg-primary/10 hover:text-primary transition-colors font-medium"
+          >
+            <Globe className="h-3.5 w-3.5 text-primary" />
+            <span>🌐 Student Resources</span>
+          </DropdownMenuItem>
         )}
 
         {onOpenAdminFeedback && (

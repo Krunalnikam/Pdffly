@@ -116,38 +116,25 @@ function createPromoBannerSvg() {
     <text x="106" y="74" fill="#475569" font-size="18" font-weight="600">Smart. Simple. Student Friendly.</text>
   </g>
 
-  <!-- Floating Sheet & Checkmark Illustration (Top Right) -->
-  <g transform="translate(1080, 160)">
-    <!-- Decorative dashed guide arcs -->
-    <path d="M20 80 Q 80 0 180 20" fill="none" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.6" />
-    <path d="M-20 120 Q 40 180 120 190" fill="none" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.6" />
+  <!-- LJIET STUDENT Card (Top Right) -->
+  <g transform="translate(915, 190)">
+    <!-- Light blue rounded card -->
+    <rect x="0" y="0" width="535" height="130" rx="16" fill="#EFF6FF" stroke="#93C5FD" stroke-width="2" />
     
-    <!-- Sparkles -->
-    <path d="M210 50 l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#93C5FD" />
-    <path d="M-40 130 l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#93C5FD" />
-
-    <!-- Document Card -->
-    <g transform="rotate(6, 120, 110)">
-      <rect x="20" y="0" width="180" height="230" rx="16" fill="#FFFFFF" stroke="#93C5FD" stroke-width="2" filter="url(#softShadow)" />
-      <!-- Horizontal lines -->
-      <line x1="50" y1="35" x2="170" y2="35" stroke="#3B82F6" stroke-width="4" stroke-linecap="round" />
-      <line x1="50" y1="55" x2="150" y2="55" stroke="#94A3B8" stroke-width="3" stroke-linecap="round" />
-      <line x1="50" y1="72" x2="165" y2="72" stroke="#94A3B8" stroke-width="3" stroke-linecap="round" />
-
-      <!-- Photo box with mountains/sun -->
-      <rect x="50" y="90" width="120" height="60" rx="6" fill="#DBEAFE" />
-      <polygon points="60,140 85,115 110,140" fill="#3B82F6" opacity="0.8" />
-      <polygon points="100,140 125,120 150,140" fill="#2563EB" opacity="0.9" />
-      <circle cx="75" cy="105" r="5" fill="#60A5FA" />
-
-      <line x1="50" y1="168" x2="170" y2="168" stroke="#CBD5E1" stroke-width="3" stroke-linecap="round" />
-      <line x1="50" y1="185" x2="140" y2="185" stroke="#CBD5E1" stroke-width="3" stroke-linecap="round" />
-      <line x1="50" y1="202" x2="160" y2="202" stroke="#CBD5E1" stroke-width="3" stroke-linecap="round" />
+    <!-- Large Graduation Cap Icon -->
+    <g transform="translate(32, 28)">
+      <!-- Cap top diamond -->
+      <polygon points="40,6 78,25 40,44 2,25" fill="#1E3A8A" />
+      <!-- Cap bottom skullcap -->
+      <path d="M14,32 L14,48 C14,58 66,58 66,48 L66,32 C58,37 49,40 40,40 C31,40 22,37 14,32 Z" fill="#1E3A8A" />
+      <!-- Tassel hanging down right -->
+      <path d="M72,28 L72,55" stroke="#1E3A8A" stroke-width="3" stroke-linecap="round" />
+      <circle cx="72" cy="58" r="4" fill="#1E3A8A" />
     </g>
 
-    <!-- Green Checkmark Badge -->
-    <circle cx="230" cy="190" r="38" fill="url(#greenBadge)" filter="url(#softShadow)" />
-    <path d="M216 190l10 10 18-20" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+    <!-- Text: LJIET STUDENT -->
+    <text x="135" y="60" fill="#1E3A8A" font-size="40" font-weight="900" font-style="italic" letter-spacing="-0.5">LJIET STUDENT</text>
+    <text x="137" y="102" fill="#1D4ED8" font-size="22" font-weight="700">Proud to Build, Ready to Submit!</text>
   </g>
 
   <!-- ================= CENTER CARD ("THE MOST IMPORTANT") ================= -->
@@ -314,25 +301,50 @@ function createPromoBannerSvg() {
   </g>
 
   <!-- ================= VERY BOTTOM DARK BLUE FOOTER ================= -->
-  <g transform="translate(0, 928)">
-    <rect width="1500" height="72" fill="#0B132B" />
+  <g transform="translate(0, 908)">
+    <!-- Full width dark navy banner -->
+    <rect width="1500" height="92" fill="#0A1128" />
 
-    <!-- Left side icon + text -->
-    <g transform="translate(48, 16)">
-      <!-- Document download icon -->
-      <path d="M4 4h20l10 10v20a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round" />
-      <path d="M14 18v10m-4-4l4 4 4-4" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-
-      <text x="75" y="26" fill="#FFFFFF" font-size="22" font-weight="800" letter-spacing="1">FAST PDF  •  PERFECT SIZE  •  SUBMISSION READY</text>
+    <!-- Left section: Graduation Cap + LJIET STUDENT -->
+    <g transform="translate(50, 18)">
+      <!-- Cap icon -->
+      <g transform="translate(0, 4)">
+        <polygon points="36,4 70,21 36,38 2,21" fill="#FFFFFF" />
+        <path d="M12,27 L12,41 C12,50 60,50 60,41 L60,27 C53,32 45,35 36,35 C27,35 19,32 12,27 Z" fill="#FFFFFF" />
+        <path d="M64,24 L64,48" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" />
+        <circle cx="64" cy="51" r="3.5" fill="#FFFFFF" />
+      </g>
+      <text x="95" y="44" fill="#FFFFFF" font-size="38" font-weight="900" font-style="italic" letter-spacing="-0.5">LJIET STUDENT</text>
     </g>
 
-    <!-- Right side button: MAKE PDF NOW -->
-    <g transform="translate(1120, 14)">
-      <rect x="0" y="0" width="330" height="44" rx="8" fill="#FFFFFF" />
-      <!-- Download Arrow icon -->
-      <path d="M35 15v14m-5-5l5 5 5-5" fill="none" stroke="#1D4ED8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-      <line x1="26" y1="33" x2="44" y2="33" stroke="#1D4ED8" stroke-width="2.5" stroke-linecap="round" />
-      <text x="60" y="29" fill="#1D4ED8" font-size="20" font-weight="800" letter-spacing="0.5">MAKE PDF NOW</text>
+    <!-- Vertical Divider Line -->
+    <line x1="525" y1="14" x2="525" y2="78" stroke="#334155" stroke-width="2" />
+
+    <!-- Center section: 2 motto lines -->
+    <g transform="translate(560, 22)">
+      <text x="0" y="20" fill="#FFFFFF" font-size="20" font-weight="700" letter-spacing="0.2">Learn. Build. Submit. Succeed.</text>
+      <text x="0" y="48" fill="#FACC15" font-size="19" font-weight="700" letter-spacing="0.2">We Build Today, You Lead Tomorrow.</text>
+    </g>
+
+    <!-- Right section: White card with Trophy -->
+    <g transform="translate(1000, 14)">
+      <rect x="0" y="0" width="450" height="64" rx="10" fill="#FFFFFF" stroke="#DBEAFE" stroke-width="1.5" />
+      
+      <!-- Blue Trophy Icon -->
+      <g transform="translate(22, 11)">
+        <!-- Cup -->
+        <path d="M8,4 h26 v14 c0,7 -5,13 -13,13 c-8,0 -13,-6 -13,-13 Z" fill="#2563EB" />
+        <!-- Handles -->
+        <path d="M8,7 H4 c-2,0 -4,2 -4,4 c0,5 3,9 8,9 v-3 c-3,0 -5,-3 -5,-6 c0,-1 1,-1 1,-1 h4 Z" fill="#2563EB" />
+        <path d="M34,7 h4 c2,0 4,2 4,4 c0,5 -3,9 -8,9 v-3 c3,0 5,-3 5,-6 c0,-1 -1,-1 -1,-1 h-4 Z" fill="#2563EB" />
+        <!-- Stem & Base -->
+        <rect x="18" y="31" width="6" height="5" fill="#2563EB" />
+        <path d="M12,36 h18 v4 h-18 Z" fill="#2563EB" rx="1" />
+      </g>
+
+      <!-- Text inside card -->
+      <text x="75" y="26" fill="#1D4ED8" font-size="13.5" font-weight="800" letter-spacing="0.4">SMART WORK. PERFECT SUBMISSION.</text>
+      <text x="75" y="47" fill="#1E3A8A" font-size="13.5" font-weight="900" letter-spacing="0.4">MAKE PDF. MAKE IMPACT.</text>
     </g>
   </g>
 </svg>`;

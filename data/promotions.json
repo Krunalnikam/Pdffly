@@ -1,0 +1,58 @@
+[
+  {
+    "id": "promo_gtu_papers",
+    "name": "GTU Study Hub & Question Papers",
+    "url": "https://gtu.ac.in",
+    "imageUrl": "",
+    "subject": "DS",
+    "shortDescription": "Free past question papers, syllabus guides, and engineering solution sets.",
+    "fullDetails": "Access thousands of verified past university exam papers, detailed marking schemes, practical lab manuals, and chapter-wise study notes curated for engineering and diploma students. Keep this resource bookmarked for mid-terms and finals.",
+    "customButtonName": "Explore Study Papers",
+    "isActive": true,
+    "createdAt": "2026-09-01T10:00:00.000Z",
+    "updatedAt": "2026-09-10T13:06:24.666Z",
+    "clicksCount": 14
+  },
+  {
+    "id": "promo_student_notes",
+    "name": "Classroom Notes & Assignment Portal",
+    "url": "https://classroom.google.com",
+    "imageUrl": "",
+    "subject": "Python",
+    "shortDescription": "Quick access to lecture notes, assignment schedules, and reference PDFs.",
+    "fullDetails": "Direct gateway for students to check pending lab assignments, professor announcements, and lecture slides. Pair your scanned PDF submissions with classroom submissions seamlessly.",
+    "customButtonName": "Open Classroom",
+    "isActive": true,
+    "createdAt": "2026-09-02T12:00:00.000Z",
+    "updatedAt": "2026-09-10T12:46:34.769Z",
+    "clicksCount": 9
+  },
+  {
+    "id": "promo_1789044344563_f20c5",
+    "name": "LJIET NOTES",
+    "url": "https://phenomenal-sprinkles-0f0aac.netlify.app",
+    "imageUrl": "https://phenomenal-sprinkles-0f0aac.netlify.app",
+    "subject": "FSD",
+    "shortDescription": "Notex",
+    "fullDetails": "All sem notes",
+    "customButtonName": "Notex",
+    "isActive": false,
+    "createdAt": "2026-09-10T12:45:44.563Z",
+    "updatedAt": "2026-09-10T13:06:25.982Z",
+    "clicksCount": 2
+  },
+  {
+    "id": "promo_1789045493190_a6u3j",
+    "name": "Nine",
+    "url": "https://phenomenal-sprinkles-0f0aac.netlify.app",
+    "imageUrl": "",
+    "subject": "Java",
+    "shortDescription": "Nine",
+    "fullDetails": "None",
+    "customButtonName": "Visit Website →",
+    "isActive": false,
+    "createdAt": "2026-09-10T13:04:53.190Z",
+    "updatedAt": "2026-09-10T13:06:27.004Z",
+    "clicksCount": 0
+  }
+]

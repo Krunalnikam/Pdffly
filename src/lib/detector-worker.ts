@@ -628,22 +628,134 @@ export function processDocumentPixels(
   };
 }
 
+export type WorkerMessage =
+  | { type?: "detect"; id: number; buffer: ArrayBuffer; width: number; height: number }
+  | {
+      type: "warp";
+      id: number;
+      srcBuffer: ArrayBuffer;
+      iw: number;
+      ih: number;
+      w: number;
+      h: number;
+      sol: number[];
+    };
+
+function warpPixels(
+  srcBuffer: ArrayBuffer,
+  iw: number,
+  ih: number,
+  w: number,
+  h: number,
+  sol: number[],
+): ArrayBuffer {
+  const srcData = new Uint8ClampedArray(srcBuffer);
+  const outImage = new Uint8ClampedArray(w * h * 4);
+  const maxSrcX = iw - 1;
+  const maxSrcY = ih - 1;
+  const [h11, h12, h13, h21, h22, h23, h31, h32] = sol;
+
+  for (let y = 0; y < h; y++) {
+    const rowOffset = y * w * 4;
+    const yDenTerm = h32! * y + 1;
+    const yNumXTerm = h12! * y + h13!;
+    const yNumYTerm = h22! * y + h23!;
+
+    for (let x = 0; x < w; x++) {
+      const o = rowOffset + x * 4;
+      const den = h31! * x + yDenTerm;
+
+      if (Math.abs(den) < 1e-6) {
+        outImage[o] = 255;
+        outImage[o + 1] = 255;
+        outImage[o + 2] = 255;
+        outImage[o + 3] = 255;
+        continue;
+      }
+
+      const rawSx = (h11! * x + yNumXTerm) / den;
+      const rawSy = (h21! * x + yNumYTerm) / den;
+
+      if (isNaN(rawSx) || isNaN(rawSy) || !isFinite(rawSx) || !isFinite(rawSy)) {
+        outImage[o] = 255;
+        outImage[o + 1] = 255;
+        outImage[o + 2] = 255;
+        outImage[o + 3] = 255;
+        continue;
+      }
+
+      const sx = Math.max(0, Math.min(maxSrcX, rawSx));
+      const sy = Math.max(0, Math.min(maxSrcY, rawSy));
+
+      const x0 = Math.floor(sx);
+      const y0 = Math.floor(sy);
+      const x1 = Math.min(maxSrcX, x0 + 1);
+      const y1 = Math.min(maxSrcY, y0 + 1);
+
+      const fx = sx - x0;
+      const fy = sy - y0;
+
+      const w00 = (1 - fx) * (1 - fy);
+      const w10 = fx * (1 - fy);
+      const w01 = (1 - fx) * fy;
+      const w11 = fx * fy;
+
+      const i00 = (y0 * iw + x0) * 4;
+      const i10 = (y0 * iw + x1) * 4;
+      const i01 = (y1 * iw + x0) * 4;
+      const i11 = (y1 * iw + x1) * 4;
+
+      outImage[o] = Math.round(
+        srcData[i00]! * w00 + srcData[i10]! * w10 + srcData[i01]! * w01 + srcData[i11]! * w11,
+      );
+      outImage[o + 1] = Math.round(
+        srcData[i00 + 1]! * w00 +
+          srcData[i10 + 1]! * w10 +
+          srcData[i01 + 1]! * w01 +
+          srcData[i11 + 1]! * w11,
+      );
+      outImage[o + 2] = Math.round(
+        srcData[i00 + 2]! * w00 +
+          srcData[i10 + 2]! * w10 +
+          srcData[i01 + 2]! * w01 +
+          srcData[i11 + 2]! * w11,
+      );
+      outImage[o + 3] = 255;
+    }
+  }
+
+  return outImage.buffer;
+}
+
 // Worker message handling (when running inside a Web Worker thread)
 if (typeof self !== "undefined" && typeof (self as unknown as Worker).postMessage === "function") {
-  self.onmessage = (
-    e: MessageEvent<{ id: number; buffer: ArrayBuffer; width: number; height: number }>,
-  ) => {
-    const { id, buffer, width, height } = e.data;
-    try {
-      const data = new Uint8ClampedArray(buffer);
-      const result = processDocumentPixels(data, width, height);
-      (self as unknown as Worker).postMessage({ id, result, success: true });
-    } catch {
-      (self as unknown as Worker).postMessage({
-        id,
-        result: { quad: FULL_QUAD(), confidence: 0, blurry: false, isConfident: false },
-        success: false,
-      });
+  self.onmessage = (e: MessageEvent<WorkerMessage>) => {
+    const data = e.data;
+    if (data.type === "warp") {
+      const { id, srcBuffer, iw, ih, w, h, sol } = data;
+      try {
+        const outBuffer = warpPixels(srcBuffer, iw, ih, w, h, sol);
+        (self as unknown as Worker).postMessage(
+          { type: "warp", id, outBuffer, w, h, success: true },
+          [outBuffer],
+        );
+      } catch {
+        (self as unknown as Worker).postMessage({ type: "warp", id, success: false });
+      }
+    } else {
+      const { id, buffer, width, height } = data;
+      try {
+        const d = new Uint8ClampedArray(buffer);
+        const result = processDocumentPixels(d, width, height);
+        (self as unknown as Worker).postMessage({ type: "detect", id, result, success: true });
+      } catch {
+        (self as unknown as Worker).postMessage({
+          type: "detect",
+          id,
+          result: { quad: FULL_QUAD(), confidence: 0, blurry: false, isConfident: false },
+          success: false,
+        });
+      }
     }
   };
 }

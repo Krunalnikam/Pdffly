@@ -194,9 +194,79 @@ export const recordVisitServerFn = createServerFn({ method: "POST" })
 
     await writeAnalyticsToFile(store);
 
+    // Keep in-memory active students map updated
+    recordActiveStudentHeartbeat(data.visitorId);
+
     return {
       success: true,
       recorded: true,
+    };
+  });
+
+// Active window threshold: A student is considered active if a heartbeat was received within 60 seconds
+const ACTIVE_STUDENT_TIMEOUT_MS = 60 * 1000;
+const activeStudentsMap = new Map<string, number>();
+
+export function recordActiveStudentHeartbeat(visitorId: string): number {
+  if (visitorId) {
+    activeStudentsMap.set(visitorId, Date.now());
+  }
+  return cleanAndGetActiveStudentsCount();
+}
+
+export function cleanAndGetActiveStudentsCount(): number {
+  const now = Date.now();
+  for (const [id, lastSeen] of activeStudentsMap.entries()) {
+    if (now - lastSeen > ACTIVE_STUDENT_TIMEOUT_MS) {
+      activeStudentsMap.delete(id);
+    }
+  }
+  return activeStudentsMap.size;
+}
+
+/**
+ * Server Function: Live Student Heartbeat
+ * Records student presence and returns the current number of active students.
+ */
+export const pingActiveStudentHeartbeatServerFn = createServerFn({ method: "POST" })
+  .validator((data: unknown) => {
+    const d = (data || {}) as Record<string, unknown>;
+    const rawVisitorId = String(d.visitorId || "")
+      .trim()
+      .slice(0, 64);
+    return {
+      visitorId: rawVisitorId,
+    };
+  })
+  .handler(async ({ data }): Promise<{ success: boolean; activeCount: number }> => {
+    const count = recordActiveStudentHeartbeat(data.visitorId);
+    return {
+      success: true,
+      activeCount: count,
+    };
+  });
+
+/**
+ * Server Function: Student Disconnect / Leave
+ */
+export const leaveActiveStudentServerFn = createServerFn({ method: "POST" })
+  .validator((data: unknown) => {
+    const d = (data || {}) as Record<string, unknown>;
+    const rawVisitorId = String(d.visitorId || "")
+      .trim()
+      .slice(0, 64);
+    return {
+      visitorId: rawVisitorId,
+    };
+  })
+  .handler(async ({ data }): Promise<{ success: boolean; activeCount: number }> => {
+    if (data.visitorId) {
+      activeStudentsMap.delete(data.visitorId);
+    }
+    const count = cleanAndGetActiveStudentsCount();
+    return {
+      success: true,
+      activeCount: count,
     };
   });
 
