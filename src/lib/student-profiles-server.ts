@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { SavedStudentProfileRecord } from "@/types";
+import { verifyAdminKey } from "./admin-auth-server";
 
 function getDataDir(): string {
   if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
@@ -13,10 +14,6 @@ function getDataDir(): string {
 
 function getProfilesFilePath(): string {
   return path.join(getDataDir(), "student-profiles.json");
-}
-
-function getAdminKey(): string {
-  return process.env.FEEDBACK_ADMIN_KEY?.trim() || "Krunal21128q";
 }
 
 async function readProfilesFromFile(): Promise<SavedStudentProfileRecord[]> {
@@ -150,8 +147,8 @@ export const getSavedStudentProfilesServerFn = createServerFn({ method: "POST" }
       profiles: SavedStudentProfileRecord[];
       totalCount: number;
     }> => {
-      const expectedKey = getAdminKey();
-      if (!data.adminKey || data.adminKey !== expectedKey) {
+      const isAuthorized = await verifyAdminKey(data.adminKey);
+      if (!isAuthorized) {
         throw new Error("Unauthorized: Invalid Admin Security Key");
       }
 

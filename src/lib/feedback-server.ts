@@ -2,6 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+import { verifyAdminKey, verifyAdminKeyServerFn } from "./admin-auth-server";
+export { verifyAdminKeyServerFn };
 
 export type FeedbackType = "bug" | "feature" | "improvement" | "general";
 
@@ -33,11 +35,6 @@ function getDataDir(): string {
 
 function getFeedbackFilePath(): string {
   return path.join(getDataDir(), "feedback.json");
-}
-
-// Helper to get or fallback admin key
-function getAdminKey(): string {
-  return process.env.FEEDBACK_ADMIN_KEY?.trim() || "Krunal21128q";
 }
 
 // Helper to ensure data file exists and read contents safely
@@ -162,24 +159,6 @@ export const submitFeedbackServerFn = createServerFn({ method: "POST" })
   });
 
 /**
- * Server Function: Verify Admin Passkey
- */
-export const verifyAdminKeyServerFn = createServerFn({ method: "POST" })
-  .validator((data: unknown) => {
-    const d = data as { adminKey?: string };
-    return {
-      adminKey: String(d?.adminKey || "").trim(),
-    };
-  })
-  .handler(async ({ data }) => {
-    const expectedKey = getAdminKey();
-    const isAuthorized = Boolean(data.adminKey && data.adminKey === expectedKey);
-    return {
-      authorized: isAuthorized,
-    };
-  });
-
-/**
  * Server Function: Fetch all feedback items for Admin Dashboard (Owner ONLY)
  */
 export const getAdminFeedbackListServerFn = createServerFn({ method: "POST" })
@@ -191,8 +170,8 @@ export const getAdminFeedbackListServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const expectedKey = getAdminKey();
-    if (!data.adminKey || data.adminKey !== expectedKey) {
+    const isAuthorized = await verifyAdminKey(data.adminKey);
+    if (!isAuthorized) {
       throw new Error("Unauthorized: Invalid Admin Security Key");
     }
 
@@ -240,8 +219,8 @@ export const deleteFeedbackServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const expectedKey = getAdminKey();
-    if (!data.adminKey || data.adminKey !== expectedKey) {
+    const isAuthorized = await verifyAdminKey(data.adminKey);
+    if (!isAuthorized) {
       throw new Error("Unauthorized: Invalid Admin Security Key");
     }
 

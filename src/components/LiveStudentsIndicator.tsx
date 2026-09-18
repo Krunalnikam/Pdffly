@@ -6,7 +6,7 @@ import {
 } from "@/lib/analytics-server";
 
 const VISITOR_ID_KEY = "pdfmaker_anon_visitor_id";
-const HEARTBEAT_INTERVAL_MS = 20000; // 20 seconds
+const HEARTBEAT_INTERVAL_MS = 15000; // 15 seconds for timely updates
 const THRESHOLD_COUNT = 50; // Only display if 50 or more active students
 
 function getOrCreateVisitorId(): string {
@@ -49,7 +49,7 @@ export function LiveStudentsIndicator() {
     // Initial ping on load
     sendHeartbeat();
 
-    // Periodic heartbeat every 20 seconds
+    // Periodic heartbeat every 15 seconds for real-time tracking
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
         sendHeartbeat();
@@ -88,10 +88,14 @@ export function LiveStudentsIndicator() {
     };
   }, []);
 
-  // Strict requirement: When real live student traffic reaches 50+, it dynamically reflects
-  // the live server count. For this preview/demo environment, we show the requested sample count (73)
-  // so you can inspect the exact visual presentation and behavior.
-  const displayCount = liveCount >= THRESHOLD_COUNT ? liveCount : 73;
+  // Display Rule:
+  // - If active students < 50: Completely hide the badge.
+  // - If active students >= 50: Show "🟢 [REAL COUNT] students are currently using PDFly"
+  // - If the count falls below 50, immediately hide the badge again.
+  // Never show any static, hard-coded, or simulated fallback number.
+  if (liveCount < THRESHOLD_COUNT) {
+    return null;
+  }
 
   return (
     <div
@@ -99,18 +103,14 @@ export function LiveStudentsIndicator() {
       className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 shadow-2xs transition-all duration-300 animate-fade-in select-none"
       role="status"
       aria-live="polite"
-      title={
-        liveCount >= THRESHOLD_COUNT
-          ? `${liveCount} active students`
-          : "Preview demo count: 73 students currently active"
-      }
+      title={`${liveCount} students are currently using PDFly`}
     >
-      <span className="relative flex h-2 w-2">
+      <span className="relative flex h-2 w-2" aria-hidden="true">
         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
         <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
       </span>
       <span className="tabular-nums font-medium">
-        {t("liveStudentsUsing", { count: displayCount })}
+        {t("liveStudentsUsing", { count: liveCount })}
       </span>
     </div>
   );

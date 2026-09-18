@@ -33,6 +33,7 @@ export default defineConfig(({ command }) => {
       tailwindcss(),
       tsConfigPaths({ projects: ["./tsconfig.json"] }),
       tanstackStart({
+        client: { entry: "client" },
         server: { entry: "server" },
       }),
       ...(command === "build"

@@ -348,7 +348,7 @@ export function StudentResourcesModal({ isOpen, onClose }: StudentResourcesModal
         <div className="p-4 sm:p-5 border-t border-border/80 bg-secondary/15 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
-            <span>PDFfly remains 100% free with no interruptions to your documents.</span>
+            <span>PDFly remains 100% free with no interruptions to your documents.</span>
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">

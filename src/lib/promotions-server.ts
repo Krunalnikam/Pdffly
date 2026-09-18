@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { PromotionItem } from "@/types";
+import { verifyAdminKey } from "./admin-auth-server";
 
 export interface PromotionStats {
   total: number;
@@ -20,10 +21,6 @@ function getDataDir(): string {
 
 function getPromotionsFilePath(): string {
   return path.join(getDataDir(), "promotions.json");
-}
-
-function getAdminKey(): string {
-  return process.env.FEEDBACK_ADMIN_KEY?.trim() || "Krunal21128q";
 }
 
 // Helper to normalize and sanitize URLs
@@ -147,8 +144,8 @@ export const getAdminPromotionsListServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const expectedKey = getAdminKey();
-    if (!data.adminKey || data.adminKey !== expectedKey) {
+    const isAuthorized = await verifyAdminKey(data.adminKey);
+    if (!isAuthorized) {
       throw new Error("Unauthorized: Invalid Admin Security Key");
     }
 
@@ -202,8 +199,8 @@ export const savePromotionServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const expectedKey = getAdminKey();
-    if (!data.adminKey || data.adminKey !== expectedKey) {
+    const isAuthorized = await verifyAdminKey(data.adminKey);
+    if (!isAuthorized) {
       throw new Error("Unauthorized: Invalid Admin Security Key");
     }
 
@@ -313,8 +310,8 @@ export const reorderPromotionsServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const expectedKey = getAdminKey();
-    if (!data.adminKey || data.adminKey !== expectedKey) {
+    const isAuthorized = await verifyAdminKey(data.adminKey);
+    if (!isAuthorized) {
       throw new Error("Unauthorized: Invalid Admin Security Key");
     }
 
@@ -359,8 +356,8 @@ export const togglePromotionActiveServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const expectedKey = getAdminKey();
-    if (!data.adminKey || data.adminKey !== expectedKey) {
+    const isAuthorized = await verifyAdminKey(data.adminKey);
+    if (!isAuthorized) {
       throw new Error("Unauthorized: Invalid Admin Security Key");
     }
 
@@ -393,8 +390,8 @@ export const deletePromotionServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const expectedKey = getAdminKey();
-    if (!data.adminKey || data.adminKey !== expectedKey) {
+    const isAuthorized = await verifyAdminKey(data.adminKey);
+    if (!isAuthorized) {
       throw new Error("Unauthorized: Invalid Admin Security Key");
     }
 

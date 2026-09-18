@@ -39,6 +39,7 @@ import {
 import { getAdminAnalyticsServerFn, type AnalyticsSummary } from "@/lib/analytics-server";
 import { AdminAnalyticsView } from "@/components/AdminAnalyticsView";
 import { AdminPromotionsManager } from "@/components/AdminPromotionsManager";
+import { AdminForgotPasswordModal } from "@/components/AdminForgotPasswordModal";
 
 export const Route = createFileRoute("/admin")({
   component: AdminDashboardPage,
@@ -54,6 +55,7 @@ function AdminDashboardPage() {
   const [activePasskey, setActivePasskey] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
 
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
@@ -347,6 +349,20 @@ function AdminDashboardPage() {
                 />
               </div>
 
+              <div className="flex justify-end pt-0.5">
+                <button
+                  id="btn-admin-forgot-password"
+                  type="button"
+                  onClick={() => {
+                    setAuthError(null);
+                    setIsForgotPasswordOpen(true);
+                  }}
+                  className="text-xs font-medium text-primary hover:underline transition-colors focus:outline-none cursor-pointer"
+                >
+                  {t("adminForgotPassword")}
+                </button>
+              </div>
+
               <Button
                 type="submit"
                 disabled={isVerifying || !passkeyInput.trim()}
@@ -622,6 +638,23 @@ function AdminDashboardPage() {
           </div>
         )}
       </main>
+
+      {/* Forgot Password Recovery Modal */}
+      <AdminForgotPasswordModal
+        isOpen={isForgotPasswordOpen}
+        onClose={() => setIsForgotPasswordOpen(false)}
+        onPasswordResetSuccess={() => {
+          setIsForgotPasswordOpen(false);
+          setActivePasskey(null);
+          setPasskeyInput("");
+          try {
+            sessionStorage.removeItem(ADMIN_STORAGE_KEY);
+          } catch {
+            // ignore
+          }
+          setAuthError(null);
+        }}
+      />
     </div>
   );
 }

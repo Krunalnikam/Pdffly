@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+import { verifyAdminKey } from "./admin-auth-server";
 
 export interface VisitorRecord {
   visitorId: string;
@@ -53,10 +54,6 @@ function getDataDir(): string {
 
 function getAnalyticsFilePath(): string {
   return path.join(getDataDir(), "analytics.json");
-}
-
-function getAdminKey(): string {
-  return process.env.FEEDBACK_ADMIN_KEY?.trim() || "Krunal21128q";
 }
 
 // Get current date string formatted as YYYY-MM-DD
@@ -195,7 +192,7 @@ export const recordVisitServerFn = createServerFn({ method: "POST" })
     await writeAnalyticsToFile(store);
 
     // Keep in-memory active students map updated
-    recordActiveStudentHeartbeat(data.visitorId);
+    await recordActiveStudentHeartbeat(data.visitorId);
 
     return {
       success: true,
@@ -203,15 +200,69 @@ export const recordVisitServerFn = createServerFn({ method: "POST" })
     };
   });
 
-// Active window threshold: A student is considered active if a heartbeat was received within 60 seconds
-const ACTIVE_STUDENT_TIMEOUT_MS = 60 * 1000;
+// Active window threshold: A student is considered active if a heartbeat was received within 45 seconds
+const ACTIVE_STUDENT_TIMEOUT_MS = 45 * 1000;
 const activeStudentsMap = new Map<string, number>();
+let isSessionsInitialized = false;
 
-export function recordActiveStudentHeartbeat(visitorId: string): number {
-  if (visitorId) {
-    activeStudentsMap.set(visitorId, Date.now());
+function getActiveSessionsFilePath(): string {
+  return path.join(getDataDir(), "active-sessions.json");
+}
+
+async function loadActiveSessionsFromFile(): Promise<void> {
+  if (isSessionsInitialized) return;
+  isSessionsInitialized = true;
+  const filePath = getActiveSessionsFilePath();
+  try {
+    const content = await fs.readFile(filePath, "utf-8");
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed === "object") {
+      const now = Date.now();
+      for (const [id, lastSeen] of Object.entries(parsed)) {
+        const ts = Number(lastSeen);
+        if (id && Number.isFinite(ts) && now - ts <= ACTIVE_STUDENT_TIMEOUT_MS) {
+          activeStudentsMap.set(id, ts);
+        }
+      }
+    }
+  } catch {
+    // File doesn't exist yet or is empty; start clean
   }
-  return cleanAndGetActiveStudentsCount();
+}
+
+async function persistActiveSessionsToFile(): Promise<void> {
+  const filePath = getActiveSessionsFilePath();
+  const dir = getDataDir();
+  const serialized: Record<string, number> = {};
+  for (const [id, lastSeen] of activeStudentsMap.entries()) {
+    serialized[id] = lastSeen;
+  }
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(serialized, null, 2), "utf-8");
+  } catch {
+    // Ignore persistence failures in read-only environments
+  }
+}
+
+export async function recordActiveStudentHeartbeat(visitorId: string): Promise<number> {
+  await loadActiveSessionsFromFile();
+  if (visitorId && typeof visitorId === "string" && visitorId.trim()) {
+    activeStudentsMap.set(visitorId.trim(), Date.now());
+  }
+  const count = cleanAndGetActiveStudentsCount();
+  await persistActiveSessionsToFile();
+  return count;
+}
+
+export async function removeActiveStudent(visitorId: string): Promise<number> {
+  await loadActiveSessionsFromFile();
+  if (visitorId && typeof visitorId === "string" && visitorId.trim()) {
+    activeStudentsMap.delete(visitorId.trim());
+  }
+  const count = cleanAndGetActiveStudentsCount();
+  await persistActiveSessionsToFile();
+  return count;
 }
 
 export function cleanAndGetActiveStudentsCount(): number {
@@ -239,7 +290,7 @@ export const pingActiveStudentHeartbeatServerFn = createServerFn({ method: "POST
     };
   })
   .handler(async ({ data }): Promise<{ success: boolean; activeCount: number }> => {
-    const count = recordActiveStudentHeartbeat(data.visitorId);
+    const count = await recordActiveStudentHeartbeat(data.visitorId);
     return {
       success: true,
       activeCount: count,
@@ -260,10 +311,7 @@ export const leaveActiveStudentServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<{ success: boolean; activeCount: number }> => {
-    if (data.visitorId) {
-      activeStudentsMap.delete(data.visitorId);
-    }
-    const count = cleanAndGetActiveStudentsCount();
+    const count = await removeActiveStudent(data.visitorId);
     return {
       success: true,
       activeCount: count,
@@ -281,8 +329,8 @@ export const getAdminAnalyticsServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<{ success: boolean; analytics: AnalyticsSummary }> => {
-    const expectedKey = getAdminKey();
-    if (!data.adminKey || data.adminKey !== expectedKey) {
+    const isAuthorized = await verifyAdminKey(data.adminKey);
+    if (!isAuthorized) {
       throw new Error("Unauthorized: Invalid Admin Security Key");
     }
 
