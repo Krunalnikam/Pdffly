@@ -1,26 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-import * as os from "node:os";
 import type { PromotionItem } from "@/types";
 import { verifyAdminKey } from "./admin-auth-server";
+import { readStorageData, writeStorageData } from "./storage-provider";
 
 export interface PromotionStats {
   total: number;
   activeCount: number;
   inactiveCount: number;
   totalClicks: number;
-}
-
-function getDataDir(): string {
-  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    return path.join(os.tmpdir(), "pdfly-data");
-  }
-  return path.join(process.cwd(), "data");
-}
-
-function getPromotionsFilePath(): string {
-  return path.join(getDataDir(), "promotions.json");
 }
 
 // Helper to normalize and sanitize URLs
@@ -66,57 +53,27 @@ const SEED_PROMOTIONS: PromotionItem[] = [
 ];
 
 // Helper to read promotions safely
-async function readPromotionsFromFile(): Promise<PromotionItem[]> {
-  const primaryPath = getPromotionsFilePath();
-  try {
-    const content = await fs.readFile(primaryPath, "utf-8");
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-  } catch {
-    // If not in primary path, check repository data/promotions.json
-    const repoPath = path.join(process.cwd(), "data", "promotions.json");
-    try {
-      const content = await fs.readFile(repoPath, "utf-8");
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    } catch {
-      // Return seeds
-    }
+export async function readPromotionsFromFile(): Promise<PromotionItem[]> {
+  const items = await readStorageData<PromotionItem[]>(
+    "promotions-items",
+    "promotions.json",
+    SEED_PROMOTIONS,
+  );
+  if (Array.isArray(items) && items.length > 0) {
+    return items;
   }
   return [...SEED_PROMOTIONS];
 }
 
 // Helper to write promotions safely
-async function writePromotionsToFile(items: PromotionItem[]): Promise<void> {
-  const dir = getDataDir();
-  const filePath = getPromotionsFilePath();
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(items, null, 2), "utf-8");
-  } catch (err) {
-    const tmpDir = path.join(os.tmpdir(), "pdfly-data");
-    if (dir !== tmpDir) {
-      await fs.mkdir(tmpDir, { recursive: true });
-      await fs.writeFile(
-        path.join(tmpDir, "promotions.json"),
-        JSON.stringify(items, null, 2),
-        "utf-8",
-      );
-    } else {
-      console.error("Failed to write promotions file:", err);
-    }
-  }
+export async function writePromotionsToFile(items: PromotionItem[]): Promise<void> {
+  await writeStorageData("promotions-items", "promotions.json", items);
 }
 
-/**
- * Server Function: Get all ACTIVE promotions for PDFly first page
- * Public, ultra-lightweight and cached-friendly
- */
-export const getActivePromotionsServerFn = createServerFn({ method: "GET" }).handler(async () => {
+export async function getActivePromotionsDirect(): Promise<{
+  success: boolean;
+  items: PromotionItem[];
+}> {
   try {
     const items = await readPromotionsFromFile();
     const active = items.filter((p) => p.isActive);
@@ -131,6 +88,252 @@ export const getActivePromotionsServerFn = createServerFn({ method: "GET" }).han
       items: SEED_PROMOTIONS.filter((p) => p.isActive),
     };
   }
+}
+
+export async function getAdminPromotionsListDirect(adminKey: string): Promise<{
+  success: boolean;
+  items: PromotionItem[];
+  stats: PromotionStats;
+}> {
+  const isAuthorized = await verifyAdminKey(adminKey);
+  if (!isAuthorized) {
+    throw new Error("Unauthorized: Invalid Admin Security Key");
+  }
+
+  const items = await readPromotionsFromFile();
+  const total = items.length;
+  const activeCount = items.filter((i) => i.isActive).length;
+  const inactiveCount = total - activeCount;
+  const totalClicks = items.reduce((acc, i) => acc + (i.clicksCount || 0), 0);
+
+  const stats: PromotionStats = {
+    total,
+    activeCount,
+    inactiveCount,
+    totalClicks,
+  };
+
+  return {
+    success: true,
+    items,
+    stats,
+  };
+}
+
+export async function savePromotionDirect(
+  adminKey: string,
+  promotion: {
+    id?: string;
+    name?: string;
+    url?: string;
+    imageUrl?: string;
+    subject?: string;
+    shortDescription?: string;
+    fullDetails?: string;
+    customButtonName?: string;
+    isActive?: boolean;
+  },
+): Promise<{ success: boolean; item: PromotionItem }> {
+  const isAuthorized = await verifyAdminKey(adminKey);
+  if (!isAuthorized) {
+    throw new Error("Unauthorized: Invalid Admin Security Key");
+  }
+
+  const name = (promotion.name || "").trim();
+  if (!name) {
+    throw new Error("Website name is required");
+  }
+
+  const rawUrl = (promotion.url || "").trim();
+  if (!rawUrl) {
+    throw new Error("Website URL is required");
+  }
+  const cleanUrl = sanitizeUrl(rawUrl);
+
+  const shortDescription = (promotion.shortDescription || "").trim();
+  if (!shortDescription) {
+    throw new Error("Short description is required");
+  }
+
+  const fullDetails = (promotion.fullDetails || "").trim();
+  if (!fullDetails) {
+    throw new Error("Full details are required");
+  }
+
+  const customButtonName = (promotion.customButtonName || "").trim() || "Visit Website →";
+  const isActive = promotion.isActive !== false;
+  const imageUrl = (promotion.imageUrl || "").trim();
+  const subject = (promotion.subject || "").trim();
+
+  const items = await readPromotionsFromFile();
+  const now = new Date().toISOString();
+
+  let savedItem: PromotionItem;
+  if (promotion.id) {
+    const index = items.findIndex((i) => i.id === promotion.id);
+    if (index !== -1) {
+      const existing = items[index];
+      savedItem = {
+        ...existing,
+        name,
+        url: cleanUrl,
+        imageUrl,
+        subject,
+        shortDescription,
+        fullDetails,
+        customButtonName,
+        isActive,
+        updatedAt: now,
+      };
+      items[index] = savedItem;
+    } else {
+      savedItem = {
+        id: promotion.id,
+        name,
+        url: cleanUrl,
+        imageUrl,
+        subject,
+        shortDescription,
+        fullDetails,
+        customButtonName,
+        isActive,
+        createdAt: now,
+        updatedAt: now,
+        clicksCount: 0,
+      };
+      items.unshift(savedItem);
+    }
+  } else {
+    const newId = `promo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    savedItem = {
+      id: newId,
+      name,
+      url: cleanUrl,
+      imageUrl,
+      subject,
+      shortDescription,
+      fullDetails,
+      customButtonName,
+      isActive,
+      createdAt: now,
+      updatedAt: now,
+      clicksCount: 0,
+    };
+    items.unshift(savedItem);
+  }
+
+  await writePromotionsToFile(items);
+
+  return {
+    success: true,
+    item: savedItem,
+  };
+}
+
+export async function reorderPromotionsDirect(
+  adminKey: string,
+  orderedIds: string[],
+): Promise<{ success: boolean; items: PromotionItem[] }> {
+  const isAuthorized = await verifyAdminKey(adminKey);
+  if (!isAuthorized) {
+    throw new Error("Unauthorized: Invalid Admin Security Key");
+  }
+
+  const items = await readPromotionsFromFile();
+  const itemMap = new Map<string, PromotionItem>();
+  for (const it of items) {
+    itemMap.set(it.id, it);
+  }
+
+  const reordered: PromotionItem[] = [];
+  for (const id of orderedIds) {
+    const item = itemMap.get(id);
+    if (item) {
+      reordered.push(item);
+      itemMap.delete(id);
+    }
+  }
+  for (const item of itemMap.values()) {
+    reordered.push(item);
+  }
+
+  await writePromotionsToFile(reordered);
+
+  return {
+    success: true,
+    items: reordered,
+  };
+}
+
+export async function togglePromotionActiveDirect(
+  adminKey: string,
+  id: string,
+  isActive: boolean,
+): Promise<{ success: boolean; item: PromotionItem }> {
+  const isAuthorized = await verifyAdminKey(adminKey);
+  if (!isAuthorized) {
+    throw new Error("Unauthorized: Invalid Admin Security Key");
+  }
+
+  const items = await readPromotionsFromFile();
+  const index = items.findIndex((i) => i.id === id);
+  if (index === -1) {
+    throw new Error("Promotion not found");
+  }
+
+  items[index].isActive = isActive;
+  items[index].updatedAt = new Date().toISOString();
+
+  await writePromotionsToFile(items);
+
+  return {
+    success: true,
+    item: items[index],
+  };
+}
+
+export async function deletePromotionDirect(
+  adminKey: string,
+  id: string,
+): Promise<{ success: boolean }> {
+  const isAuthorized = await verifyAdminKey(adminKey);
+  if (!isAuthorized) {
+    throw new Error("Unauthorized: Invalid Admin Security Key");
+  }
+
+  const items = await readPromotionsFromFile();
+  const updated = items.filter((i) => i.id !== id);
+  await writePromotionsToFile(updated);
+
+  return {
+    success: true,
+  };
+}
+
+export async function recordPromotionClickDirect(id: string): Promise<{ success: boolean }> {
+  if (!id) return { success: false };
+
+  try {
+    const items = await readPromotionsFromFile();
+    const item = items.find((i) => i.id === id);
+    if (item) {
+      item.clicksCount = (item.clicksCount || 0) + 1;
+      await writePromotionsToFile(items);
+    }
+  } catch {
+    // Non-blocking
+  }
+
+  return {
+    success: true,
+  };
+}
+
+/**
+ * Server Function: Get all ACTIVE promotions for PDFly first page
+ */
+export const getActivePromotionsServerFn = createServerFn({ method: "GET" }).handler(async () => {
+  return await getActivePromotionsDirect();
 });
 
 /**
@@ -144,29 +347,7 @@ export const getAdminPromotionsListServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const isAuthorized = await verifyAdminKey(data.adminKey);
-    if (!isAuthorized) {
-      throw new Error("Unauthorized: Invalid Admin Security Key");
-    }
-
-    const items = await readPromotionsFromFile();
-    const total = items.length;
-    const activeCount = items.filter((i) => i.isActive).length;
-    const inactiveCount = total - activeCount;
-    const totalClicks = items.reduce((acc, i) => acc + (i.clicksCount || 0), 0);
-
-    const stats: PromotionStats = {
-      total,
-      activeCount,
-      inactiveCount,
-      totalClicks,
-    };
-
-    return {
-      success: true,
-      items,
-      stats,
-    };
+    return await getAdminPromotionsListDirect(data.adminKey);
   });
 
 /**
@@ -199,103 +380,7 @@ export const savePromotionServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const isAuthorized = await verifyAdminKey(data.adminKey);
-    if (!isAuthorized) {
-      throw new Error("Unauthorized: Invalid Admin Security Key");
-    }
-
-    const { promotion } = data;
-    const name = (promotion.name || "").trim();
-    if (!name) {
-      throw new Error("Website name is required");
-    }
-
-    const rawUrl = (promotion.url || "").trim();
-    if (!rawUrl) {
-      throw new Error("Website URL is required");
-    }
-    const cleanUrl = sanitizeUrl(rawUrl);
-
-    const shortDescription = (promotion.shortDescription || "").trim();
-    if (!shortDescription) {
-      throw new Error("Short description is required");
-    }
-
-    const fullDetails = (promotion.fullDetails || "").trim();
-    if (!fullDetails) {
-      throw new Error("Full details are required");
-    }
-
-    const customButtonName = (promotion.customButtonName || "").trim() || "Visit Website →";
-    const isActive = promotion.isActive !== false;
-    const imageUrl = (promotion.imageUrl || "").trim();
-    const subject = (promotion.subject || "").trim();
-
-    const items = await readPromotionsFromFile();
-    const now = new Date().toISOString();
-
-    let savedItem: PromotionItem;
-    if (promotion.id) {
-      // Update existing
-      const index = items.findIndex((i) => i.id === promotion.id);
-      if (index !== -1) {
-        const existing = items[index];
-        savedItem = {
-          ...existing,
-          name,
-          url: cleanUrl,
-          imageUrl,
-          subject,
-          shortDescription,
-          fullDetails,
-          customButtonName,
-          isActive,
-          updatedAt: now,
-        };
-        items[index] = savedItem;
-      } else {
-        savedItem = {
-          id: promotion.id,
-          name,
-          url: cleanUrl,
-          imageUrl,
-          subject,
-          shortDescription,
-          fullDetails,
-          customButtonName,
-          isActive,
-          createdAt: now,
-          updatedAt: now,
-          clicksCount: 0,
-        };
-        items.unshift(savedItem);
-      }
-    } else {
-      // Create new
-      const newId = `promo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      savedItem = {
-        id: newId,
-        name,
-        url: cleanUrl,
-        imageUrl,
-        subject,
-        shortDescription,
-        fullDetails,
-        customButtonName,
-        isActive,
-        createdAt: now,
-        updatedAt: now,
-        clicksCount: 0,
-      };
-      items.unshift(savedItem);
-    }
-
-    await writePromotionsToFile(items);
-
-    return {
-      success: true,
-      item: savedItem,
-    };
+    return await savePromotionDirect(data.adminKey, data.promotion);
   });
 
 /**
@@ -310,37 +395,7 @@ export const reorderPromotionsServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const isAuthorized = await verifyAdminKey(data.adminKey);
-    if (!isAuthorized) {
-      throw new Error("Unauthorized: Invalid Admin Security Key");
-    }
-
-    const items = await readPromotionsFromFile();
-    const itemMap = new Map<string, PromotionItem>();
-    for (const it of items) {
-      itemMap.set(it.id, it);
-    }
-
-    const reordered: PromotionItem[] = [];
-    // Place items in the provided order
-    for (const id of data.orderedIds) {
-      const item = itemMap.get(id);
-      if (item) {
-        reordered.push(item);
-        itemMap.delete(id);
-      }
-    }
-    // Append any items that weren't in orderedIds (safety net)
-    for (const item of itemMap.values()) {
-      reordered.push(item);
-    }
-
-    await writePromotionsToFile(reordered);
-
-    return {
-      success: true,
-      items: reordered,
-    };
+    return await reorderPromotionsDirect(data.adminKey, data.orderedIds);
   });
 
 /**
@@ -356,26 +411,7 @@ export const togglePromotionActiveServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const isAuthorized = await verifyAdminKey(data.adminKey);
-    if (!isAuthorized) {
-      throw new Error("Unauthorized: Invalid Admin Security Key");
-    }
-
-    const items = await readPromotionsFromFile();
-    const index = items.findIndex((i) => i.id === data.id);
-    if (index === -1) {
-      throw new Error("Promotion not found");
-    }
-
-    items[index].isActive = data.isActive;
-    items[index].updatedAt = new Date().toISOString();
-
-    await writePromotionsToFile(items);
-
-    return {
-      success: true,
-      item: items[index],
-    };
+    return await togglePromotionActiveDirect(data.adminKey, data.id, data.isActive);
   });
 
 /**
@@ -390,18 +426,7 @@ export const deletePromotionServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const isAuthorized = await verifyAdminKey(data.adminKey);
-    if (!isAuthorized) {
-      throw new Error("Unauthorized: Invalid Admin Security Key");
-    }
-
-    const items = await readPromotionsFromFile();
-    const updated = items.filter((i) => i.id !== data.id);
-    await writePromotionsToFile(updated);
-
-    return {
-      success: true,
-    };
+    return await deletePromotionDirect(data.adminKey, data.id);
   });
 
 /**
@@ -415,20 +440,5 @@ export const recordPromotionClickServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    if (!data.id) return { success: false };
-
-    try {
-      const items = await readPromotionsFromFile();
-      const item = items.find((i) => i.id === data.id);
-      if (item) {
-        item.clicksCount = (item.clicksCount || 0) + 1;
-        await writePromotionsToFile(items);
-      }
-    } catch {
-      // Non-blocking telemetry
-    }
-
-    return {
-      success: true,
-    };
+    return await recordPromotionClickDirect(data.id);
   });

@@ -1,8 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-import * as os from "node:os";
 import { verifyAdminKey, verifyAdminKeyServerFn } from "./admin-auth-server";
+import { readStorageData, writeStorageData } from "./storage-provider";
 export { verifyAdminKeyServerFn };
 
 export type FeedbackType = "bug" | "feature" | "improvement" | "general";
@@ -26,64 +24,135 @@ export interface FeedbackStats {
   generalCount: number;
 }
 
-function getDataDir(): string {
-  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    return path.join(os.tmpdir(), "pdfly-data");
-  }
-  return path.join(process.cwd(), "data");
-}
-
-function getFeedbackFilePath(): string {
-  return path.join(getDataDir(), "feedback.json");
-}
-
 // Helper to ensure data file exists and read contents safely
-async function readFeedbacksFromFile(): Promise<StoredFeedbackItem[]> {
-  const primaryPath = getFeedbackFilePath();
-  try {
-    const content = await fs.readFile(primaryPath, "utf-8");
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-    return [];
-  } catch {
-    // If not in primary path (e.g. freshly booted Netlify function), check repo seed path
-    const seedPath = path.join(process.cwd(), "data", "feedback.json");
-    try {
-      const content = await fs.readFile(seedPath, "utf-8");
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  }
+export async function readFeedbacksFromFile(): Promise<StoredFeedbackItem[]> {
+  return await readStorageData<StoredFeedbackItem[]>("feedback-items", "feedback.json", []);
 }
 
 // Helper to write feedback file safely
-async function writeFeedbacksToFile(items: StoredFeedbackItem[]): Promise<void> {
-  const dir = getDataDir();
-  const filePath = getFeedbackFilePath();
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(items, null, 2), "utf-8");
-  } catch (err) {
-    // Fallback to tmp directory if process.cwd() is read-only
-    const tmpDir = path.join(os.tmpdir(), "pdfly-data");
-    if (dir !== tmpDir) {
-      await fs.mkdir(tmpDir, { recursive: true });
-      await fs.writeFile(
-        path.join(tmpDir, "feedback.json"),
-        JSON.stringify(items, null, 2),
-        "utf-8",
-      );
-    } else {
-      console.error("Failed to write feedback file:", err);
+export async function writeFeedbacksToFile(items: StoredFeedbackItem[]): Promise<void> {
+  await writeStorageData("feedback-items", "feedback.json", items);
+}
+
+export async function submitFeedbackDirect(data: {
+  type?: string;
+  rating?: number;
+  message?: string;
+  email?: string;
+  language?: string;
+}): Promise<{ success: boolean; id: string }> {
+  const type = String(data.type || "general") as FeedbackType;
+  const rating = Math.min(5, Math.max(1, Math.round(Number(data.rating) || 5)));
+  const message = String(data.message || "").trim();
+  const email = data.email ? String(data.email).trim() : undefined;
+  const language = String(data.language || "en");
+
+  if (!message) {
+    throw new Error("Feedback message cannot be empty");
+  }
+  if (message.length > 1000) {
+    throw new Error("Feedback message exceeds 1000 characters limit");
+  }
+  if (email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      throw new Error("Invalid email address format");
     }
   }
+
+  const validTypes: FeedbackType[] = ["bug", "feature", "improvement", "general"];
+  const resolvedType = validTypes.includes(type) ? type : "general";
+
+  const id = `fb_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const timestamp = new Date().toISOString();
+
+  const newItem: StoredFeedbackItem = {
+    id,
+    type: resolvedType,
+    rating,
+    message,
+    email,
+    timestamp,
+    language,
+  };
+
+  const existing = await readFeedbacksFromFile();
+  const updated = [newItem, ...existing];
+  await writeFeedbacksToFile(updated);
+
+  const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || process.env.FEEDBACK_OWNER_EMAIL;
+  if (ownerEmail) {
+    console.log(
+      `[FEEDBACK OWNER NOTIFICATION] 📧 New Feedback #${id} sent by ${email || "Anonymous Student"} -> Owner (${ownerEmail}) | Type: [${resolvedType.toUpperCase()}] | Rating: ${rating}/5 | Msg: "${message.substring(0, 80)}..."`,
+    );
+  }
+
+  return {
+    success: true,
+    id,
+  };
+}
+
+export async function getAdminFeedbackListDirect(data: {
+  adminKey?: string;
+  filterType?: string;
+}): Promise<{
+  success: boolean;
+  stats: FeedbackStats;
+  items: StoredFeedbackItem[];
+}> {
+  const isAuthorized = await verifyAdminKey(data.adminKey);
+  if (!isAuthorized) {
+    throw new Error("Unauthorized: Invalid Admin Security Key");
+  }
+
+  const items = await readFeedbacksFromFile();
+
+  const total = items.length;
+  const totalRatingSum = items.reduce((acc, item) => acc + item.rating, 0);
+  const averageRating = total > 0 ? Number((totalRatingSum / total).toFixed(1)) : 0;
+  const bugsCount = items.filter((i) => i.type === "bug").length;
+  const featuresCount = items.filter((i) => i.type === "feature").length;
+  const improvementsCount = items.filter((i) => i.type === "improvement").length;
+  const generalCount = items.filter((i) => i.type === "general").length;
+
+  const stats: FeedbackStats = {
+    total,
+    averageRating,
+    bugsCount,
+    featuresCount,
+    improvementsCount,
+    generalCount,
+  };
+
+  let filtered = items;
+  if (data.filterType && data.filterType !== "all") {
+    filtered = items.filter((i) => i.type === data.filterType);
+  }
+
+  return {
+    success: true,
+    stats,
+    items: filtered,
+  };
+}
+
+export async function deleteFeedbackDirect(data: {
+  adminKey?: string;
+  id?: string;
+}): Promise<{ success: boolean }> {
+  const isAuthorized = await verifyAdminKey(data.adminKey);
+  if (!isAuthorized) {
+    throw new Error("Unauthorized: Invalid Admin Security Key");
+  }
+
+  const items = await readFeedbacksFromFile();
+  const updated = items.filter((i) => i.id !== data.id);
+  await writeFeedbacksToFile(updated);
+
+  return {
+    success: true,
+  };
 }
 
 /**
@@ -94,68 +163,10 @@ export const submitFeedbackServerFn = createServerFn({ method: "POST" })
     if (typeof data !== "object" || data === null) {
       throw new Error("Invalid request body");
     }
-    const d = data as Record<string, unknown>;
-    const type = String(d.type || "general") as FeedbackType;
-    const rating = Math.min(5, Math.max(1, Math.round(Number(d.rating) || 5)));
-    const message = String(d.message || "").trim();
-    const email = d.email ? String(d.email).trim() : undefined;
-    const language = String(d.language || "en");
-
-    if (!message) {
-      throw new Error("Feedback message cannot be empty");
-    }
-    if (message.length > 1000) {
-      throw new Error("Feedback message exceeds 1000 characters limit");
-    }
-    if (email) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        throw new Error("Invalid email address format");
-      }
-    }
-
-    const validTypes: FeedbackType[] = ["bug", "feature", "improvement", "general"];
-    const resolvedType = validTypes.includes(type) ? type : "general";
-
-    return {
-      type: resolvedType,
-      rating,
-      message,
-      email,
-      language,
-    };
+    return data as Record<string, unknown>;
   })
   .handler(async ({ data }) => {
-    const id = `fb_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const timestamp = new Date().toISOString();
-
-    const newItem: StoredFeedbackItem = {
-      id,
-      type: data.type,
-      rating: data.rating,
-      message: data.message,
-      email: data.email,
-      timestamp,
-      language: data.language,
-    };
-
-    const existing = await readFeedbacksFromFile();
-    // Newest first
-    const updated = [newItem, ...existing];
-    await writeFeedbacksToFile(updated);
-
-    // Check for owner notification email setting
-    const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || process.env.FEEDBACK_OWNER_EMAIL;
-    if (ownerEmail) {
-      console.log(
-        `[FEEDBACK OWNER NOTIFICATION] 📧 New Feedback #${id} sent by ${data.email || "Anonymous Student"} -> Owner (${ownerEmail}) | Type: [${data.type.toUpperCase()}] | Rating: ${data.rating}/5 | Msg: "${data.message.substring(0, 80)}..."`,
-      );
-    }
-
-    return {
-      success: true,
-      id,
-    };
+    return await submitFeedbackDirect(data);
   });
 
 /**
@@ -170,41 +181,7 @@ export const getAdminFeedbackListServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const isAuthorized = await verifyAdminKey(data.adminKey);
-    if (!isAuthorized) {
-      throw new Error("Unauthorized: Invalid Admin Security Key");
-    }
-
-    const items = await readFeedbacksFromFile();
-
-    // Calculate statistics
-    const total = items.length;
-    const totalRatingSum = items.reduce((acc, item) => acc + item.rating, 0);
-    const averageRating = total > 0 ? Number((totalRatingSum / total).toFixed(1)) : 0;
-    const bugsCount = items.filter((i) => i.type === "bug").length;
-    const featuresCount = items.filter((i) => i.type === "feature").length;
-    const improvementsCount = items.filter((i) => i.type === "improvement").length;
-    const generalCount = items.filter((i) => i.type === "general").length;
-
-    const stats: FeedbackStats = {
-      total,
-      averageRating,
-      bugsCount,
-      featuresCount,
-      improvementsCount,
-      generalCount,
-    };
-
-    let filtered = items;
-    if (data.filterType && data.filterType !== "all") {
-      filtered = items.filter((i) => i.type === data.filterType);
-    }
-
-    return {
-      success: true,
-      stats,
-      items: filtered,
-    };
+    return await getAdminFeedbackListDirect(data);
   });
 
 /**
@@ -219,16 +196,5 @@ export const deleteFeedbackServerFn = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
-    const isAuthorized = await verifyAdminKey(data.adminKey);
-    if (!isAuthorized) {
-      throw new Error("Unauthorized: Invalid Admin Security Key");
-    }
-
-    const items = await readFeedbacksFromFile();
-    const updated = items.filter((i) => i.id !== data.id);
-    await writeFeedbacksToFile(updated);
-
-    return {
-      success: true,
-    };
+    return await deleteFeedbackDirect(data);
   });

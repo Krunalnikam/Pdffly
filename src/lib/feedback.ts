@@ -8,6 +8,7 @@ export type { FeedbackType, StoredFeedbackItem as FeedbackItem };
 
 /**
  * Persistently submits feedback to the secure server database.
+ * Dual resilient: Uses direct REST endpoint first, falling back to TanStack Start serverFn.
  */
 export async function submitFeedback(data: {
   type: FeedbackType;
@@ -36,22 +37,38 @@ export async function submitFeedback(data: {
 
   // Ensure rating is within 1-5
   const rating = Math.min(5, Math.max(1, Math.round(data.rating || 5)));
+  const payload = {
+    type: data.type,
+    rating,
+    message: trimmedMessage,
+    email: trimmedEmail || undefined,
+    language: data.language || "en",
+  };
 
+  // 1. Primary REST Endpoint
   try {
-    const res = await submitFeedbackServerFn({
-      data: {
-        type: data.type,
-        rating,
-        message: trimmedMessage,
-        email: trimmedEmail || undefined,
-        language: data.language || "en",
-      },
+    const resp = await fetch("/api/feedback/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
 
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json && json.success) {
+        return { success: true, id: json.id };
+      }
+    }
+  } catch {
+    // Fall back to serverFn
+  }
+
+  // 2. Server Function Fallback
+  try {
+    const res = await submitFeedbackServerFn({ data: payload });
     if (res && res.success) {
       return { success: true, id: res.id };
     }
-
     return { success: false, id: "", error: "Failed to save feedback to server" };
   } catch (err: unknown) {
     console.error("Failed to submit feedback to backend:", err);

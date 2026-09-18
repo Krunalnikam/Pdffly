@@ -1,74 +1,99 @@
 import { createServerFn } from "@tanstack/react-start";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-import * as os from "node:os";
 import type { SavedStudentProfileRecord } from "@/types";
 import { verifyAdminKey } from "./admin-auth-server";
+import { readStorageData, writeStorageData } from "./storage-provider";
 
-function getDataDir(): string {
-  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    return path.join(os.tmpdir(), "pdfly-data");
-  }
-  return path.join(process.cwd(), "data");
+export async function readProfilesFromFile(): Promise<SavedStudentProfileRecord[]> {
+  return await readStorageData<SavedStudentProfileRecord[]>(
+    "student-profiles",
+    "student-profiles.json",
+    [],
+  );
 }
 
-function getProfilesFilePath(): string {
-  return path.join(getDataDir(), "student-profiles.json");
+export async function writeProfilesToFile(profiles: SavedStudentProfileRecord[]): Promise<void> {
+  await writeStorageData("student-profiles", "student-profiles.json", profiles);
 }
 
-async function readProfilesFromFile(): Promise<SavedStudentProfileRecord[]> {
-  const primaryPath = getProfilesFilePath();
-  try {
-    const content = await fs.readFile(primaryPath, "utf-8");
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-  } catch {
-    const seedPath = path.join(process.cwd(), "data", "student-profiles.json");
-    try {
-      const content = await fs.readFile(seedPath, "utf-8");
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    } catch {
-      // ignore
-    }
+export async function saveStudentProfileDirect(
+  enrollmentNumber: string,
+  branch: string,
+): Promise<{ success: boolean; isNew: boolean }> {
+  const rawEnrollment = String(enrollmentNumber || "").trim();
+  const rawBranch = String(branch || "").trim();
+
+  if (!rawEnrollment) {
+    throw new Error("Enrollment Number is required");
   }
-  return [];
+  if (!rawBranch) {
+    throw new Error("Branch is required");
+  }
+
+  const cleanEnrollment = rawEnrollment.slice(0, 64);
+  const cleanBranch = rawBranch.slice(0, 64).toUpperCase();
+
+  const nowIso = new Date().toISOString();
+  const profiles = await readProfilesFromFile();
+
+  const normalizedEnrollment = cleanEnrollment.toUpperCase();
+  const existingIndex = profiles.findIndex(
+    (p) => p.enrollmentNumber.trim().toUpperCase() === normalizedEnrollment,
+  );
+
+  let isNew = false;
+  if (existingIndex >= 0) {
+    const existing = profiles[existingIndex];
+    profiles[existingIndex] = {
+      enrollmentNumber: cleanEnrollment,
+      branch: cleanBranch,
+      savedAt: existing.savedAt || nowIso,
+      updatedAt: nowIso,
+    };
+  } else {
+    isNew = true;
+    profiles.unshift({
+      enrollmentNumber: cleanEnrollment,
+      branch: cleanBranch,
+      savedAt: nowIso,
+      updatedAt: nowIso,
+    });
+  }
+
+  await writeProfilesToFile(profiles);
+
+  return {
+    success: true,
+    isNew,
+  };
 }
 
-async function writeProfilesToFile(profiles: SavedStudentProfileRecord[]): Promise<void> {
-  const dir = getDataDir();
-  const filePath = getProfilesFilePath();
-
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(profiles, null, 2), "utf-8");
-  } catch (err) {
-    const tmpDir = path.join(os.tmpdir(), "pdfly-data");
-    if (dir !== tmpDir) {
-      try {
-        await fs.mkdir(tmpDir, { recursive: true });
-        await fs.writeFile(
-          path.join(tmpDir, "student-profiles.json"),
-          JSON.stringify(profiles, null, 2),
-          "utf-8",
-        );
-      } catch (tmpErr) {
-        console.error("Failed to write student profiles to tmp dir:", tmpErr);
-      }
-    } else {
-      console.error("Failed to write student profiles file:", err);
-    }
+export async function getSavedStudentProfilesDirect(adminKey: string): Promise<{
+  success: boolean;
+  profiles: SavedStudentProfileRecord[];
+  totalCount: number;
+}> {
+  const isAuthorized = await verifyAdminKey(adminKey);
+  if (!isAuthorized) {
+    throw new Error("Unauthorized: Invalid Admin Security Key");
   }
+
+  const profiles = await readProfilesFromFile();
+
+  const sorted = [...profiles].sort((a, b) => {
+    const timeA = new Date(b.updatedAt || b.savedAt).getTime();
+    const timeB = new Date(a.updatedAt || a.savedAt).getTime();
+    return timeA - timeB;
+  });
+
+  return {
+    success: true,
+    profiles: sorted,
+    totalCount: sorted.length,
+  };
 }
 
 /**
  * Server Function: Save or Update Student Profile Record
- * Stores only Enrollment Number and Branch with timestamp.
- * Strictly avoids collecting or storing any assignments, documents, or personal PII.
  */
 export const saveStudentProfileServerFn = createServerFn({ method: "POST" })
   .validator((data: unknown) => {
@@ -76,57 +101,13 @@ export const saveStudentProfileServerFn = createServerFn({ method: "POST" })
       throw new Error("Invalid request payload");
     }
     const d = data as Record<string, unknown>;
-    const rawEnrollment = String(d.enrollmentNumber || "").trim();
-    const rawBranch = String(d.branch || "").trim();
-
-    if (!rawEnrollment) {
-      throw new Error("Enrollment Number is required");
-    }
-    if (!rawBranch) {
-      throw new Error("Branch is required");
-    }
-
     return {
-      enrollmentNumber: rawEnrollment.slice(0, 64),
-      branch: rawBranch.slice(0, 64).toUpperCase(),
+      enrollmentNumber: String(d.enrollmentNumber || "").trim(),
+      branch: String(d.branch || "").trim(),
     };
   })
   .handler(async ({ data }): Promise<{ success: boolean; isNew: boolean }> => {
-    const nowIso = new Date().toISOString();
-    const profiles = await readProfilesFromFile();
-
-    const normalizedEnrollment = data.enrollmentNumber.trim().toUpperCase();
-    const existingIndex = profiles.findIndex(
-      (p) => p.enrollmentNumber.trim().toUpperCase() === normalizedEnrollment,
-    );
-
-    let isNew = false;
-    if (existingIndex >= 0) {
-      // Update existing record without creating a duplicate
-      const existing = profiles[existingIndex];
-      profiles[existingIndex] = {
-        enrollmentNumber: data.enrollmentNumber.trim(),
-        branch: data.branch.trim().toUpperCase(),
-        savedAt: existing.savedAt || nowIso,
-        updatedAt: nowIso,
-      };
-    } else {
-      // Create new profile record
-      isNew = true;
-      profiles.unshift({
-        enrollmentNumber: data.enrollmentNumber.trim(),
-        branch: data.branch.trim().toUpperCase(),
-        savedAt: nowIso,
-        updatedAt: nowIso,
-      });
-    }
-
-    await writeProfilesToFile(profiles);
-
-    return {
-      success: true,
-      isNew,
-    };
+    return await saveStudentProfileDirect(data.enrollmentNumber, data.branch);
   });
 
 /**
@@ -147,24 +128,6 @@ export const getSavedStudentProfilesServerFn = createServerFn({ method: "POST" }
       profiles: SavedStudentProfileRecord[];
       totalCount: number;
     }> => {
-      const isAuthorized = await verifyAdminKey(data.adminKey);
-      if (!isAuthorized) {
-        throw new Error("Unauthorized: Invalid Admin Security Key");
-      }
-
-      const profiles = await readProfilesFromFile();
-
-      // Sort by latest activity (updatedAt or savedAt) descending
-      const sorted = [...profiles].sort((a, b) => {
-        const timeA = new Date(b.updatedAt || b.savedAt).getTime();
-        const timeB = new Date(a.updatedAt || a.savedAt).getTime();
-        return timeA - timeB;
-      });
-
-      return {
-        success: true,
-        profiles: sorted,
-        totalCount: sorted.length,
-      };
+      return await getSavedStudentProfilesDirect(data.adminKey);
     },
   );

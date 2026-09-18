@@ -163,6 +163,8 @@ async function postbuild() {
   // Direct /api/* and /_server/* to Netlify Functions before the SPA fallback
   const redirectsContent = [
     "/api/*          /.netlify/functions/api/:splat  200!",
+    "/_serverFn/*    /.netlify/functions/api/:splat  200!",
+    "/_serverFn      /.netlify/functions/api         200!",
     "/_server/*      /.netlify/functions/api/:splat  200!",
     "/_server        /.netlify/functions/api         200!",
     "/*              /index.html                     200",

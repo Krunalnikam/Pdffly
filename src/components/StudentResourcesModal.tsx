@@ -53,6 +53,28 @@ export function StudentResourcesModal({ isOpen, onClose }: StudentResourcesModal
     let isMounted = true;
     async function fetchPromotions() {
       setIsLoading(true);
+
+      // 1. Try REST endpoint first
+      try {
+        const resp = await fetch("/api/promotions/active");
+        if (resp.ok) {
+          const res = await resp.json();
+          if (isMounted && res && res.success && Array.isArray(res.items)) {
+            setPromotions(res.items);
+            try {
+              localStorage.setItem(PROMOTIONS_CACHE_KEY, JSON.stringify(res.items));
+            } catch {
+              // ignore
+            }
+            setIsLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // Fall back to serverFn
+      }
+
+      // 2. Server function fallback
       try {
         const res = await getActivePromotionsServerFn();
         if (isMounted && res && res.success && Array.isArray(res.items)) {
@@ -81,9 +103,19 @@ export function StudentResourcesModal({ isOpen, onClose }: StudentResourcesModal
   const handleVisit = (item: PromotionItem) => {
     // Record click silently in background
     try {
-      recordPromotionClickServerFn({ data: { id: item.id } });
+      fetch("/api/promotions/click", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id }),
+      }).catch(() => {
+        recordPromotionClickServerFn({ data: { id: item.id } }).catch(() => {});
+      });
     } catch {
-      // ignore
+      try {
+        recordPromotionClickServerFn({ data: { id: item.id } }).catch(() => {});
+      } catch {
+        // ignore
+      }
     }
 
     // Safely open in new browser tab

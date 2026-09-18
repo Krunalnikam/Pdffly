@@ -106,6 +106,28 @@ export function AdminPromotionsManager({ adminKey }: AdminPromotionsManagerProps
   const loadPromotions = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
+
+    // 1. Try REST endpoint first
+    try {
+      const resp = await fetch("/api/promotions/admin-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminKey }),
+      });
+      if (resp.ok) {
+        const res = await resp.json();
+        if (res && res.success) {
+          setPromotions(res.items);
+          setStats(res.stats);
+          setIsLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // Fall back to serverFn
+    }
+
+    // 2. Server function fallback
     try {
       const res = await getAdminPromotionsListServerFn({
         data: { adminKey },
@@ -216,18 +238,23 @@ export function AdminPromotionsManager({ adminKey }: AdminPromotionsManagerProps
     // Optimistic update
     setPromotions((prev) => prev.map((p) => (p.id === id ? { ...p, isActive: nextActive } : p)));
     try {
-      await togglePromotionActiveServerFn({
-        data: {
-          adminKey,
-          id,
-          isActive: nextActive,
-        },
+      const resp = await fetch("/api/promotions/toggle-active", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminKey, id, isActive: nextActive }),
       });
-      // Refresh stats
+      if (!resp.ok) {
+        await togglePromotionActiveServerFn({
+          data: {
+            adminKey,
+            id,
+            isActive: nextActive,
+          },
+        });
+      }
       loadPromotions();
     } catch (err) {
       console.error("Failed to toggle promotion active state:", err);
-      // Revert on error
       loadPromotions();
     }
   };
@@ -238,12 +265,19 @@ export function AdminPromotionsManager({ adminKey }: AdminPromotionsManagerProps
 
     setDeletingId(id);
     try {
-      await deletePromotionServerFn({
-        data: {
-          adminKey,
-          id,
-        },
+      const resp = await fetch("/api/promotions/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminKey, id }),
       });
+      if (!resp.ok) {
+        await deletePromotionServerFn({
+          data: {
+            adminKey,
+            id,
+          },
+        });
+      }
       await loadPromotions();
     } catch (err) {
       console.error("Failed to delete promotion:", err);
@@ -332,27 +366,59 @@ export function AdminPromotionsManager({ adminKey }: AdminPromotionsManagerProps
     }
 
     setIsSaving(true);
-    try {
-      const res = await savePromotionServerFn({
-        data: {
-          adminKey,
-          promotion: {
-            id: formData.id,
-            name: formData.name.trim(),
-            url: formData.url.trim(),
-            imageUrl: formData.imageUrl.trim(),
-            subject: formData.subject.trim(),
-            shortDescription: formData.shortDescription.trim(),
-            fullDetails: formData.fullDetails.trim(),
-            customButtonName: formData.customButtonName.trim() || "Visit Website →",
-            isActive: formData.isActive,
-          },
-        },
-      });
+    const promotionPayload = {
+      id: formData.id,
+      name: formData.name.trim(),
+      url: formData.url.trim(),
+      imageUrl: formData.imageUrl.trim(),
+      subject: formData.subject.trim(),
+      shortDescription: formData.shortDescription.trim(),
+      fullDetails: formData.fullDetails.trim(),
+      customButtonName: formData.customButtonName.trim() || "Visit Website →",
+      isActive: formData.isActive,
+    };
 
-      if (res && res.success) {
+    try {
+      let saved = false;
+
+      // 1. Try REST endpoint
+      try {
+        const resp = await fetch("/api/promotions/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            adminKey,
+            promotion: promotionPayload,
+          }),
+        });
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json && json.success) {
+            saved = true;
+          }
+        }
+      } catch {
+        // Fall back to serverFn
+      }
+
+      // 2. Server function fallback
+      if (!saved) {
+        const res = await savePromotionServerFn({
+          data: {
+            adminKey,
+            promotion: promotionPayload,
+          },
+        });
+        if (res && res.success) {
+          saved = true;
+        }
+      }
+
+      if (saved) {
         setIsFormOpen(false);
         await loadPromotions();
+      } else {
+        setFormError("Failed to save promotion");
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to save promotion";

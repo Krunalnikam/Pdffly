@@ -1,0 +1,7 @@
+{
+  "passwordHash": "04da81f633cbd4c58bce7bed92441a53f76ac205a519dfb781e5e6df4950e8f4e40cf9229a8a7d7d32a8aa498a663e04cf5dbcb1b12c07f3584f42d50eae36b7",
+  "salt": "e82bae7c32a3c5077d631ab419c32c9e",
+  "iterations": 100000,
+  "updatedAt": "2026-09-18T17:38:03.903Z",
+  "changedVia": "recovery_code"
+}

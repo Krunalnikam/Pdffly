@@ -49,6 +49,29 @@ export function AdminAnalyticsView({ analytics, isLoading, adminKey }: AdminAnal
         setIsLoadingProfiles(true);
       }
       setProfilesError(null);
+
+      // 1. Try REST endpoint first
+      try {
+        const resp = await fetch("/api/admin/profiles/list", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adminKey: effectiveAdminKey }),
+        });
+        if (resp.ok) {
+          const res = await resp.json();
+          if (res && res.success && Array.isArray(res.profiles)) {
+            setProfiles(res.profiles);
+            if (showSpinner) {
+              setIsLoadingProfiles(false);
+            }
+            return;
+          }
+        }
+      } catch {
+        // Fall back to serverFn
+      }
+
+      // 2. Server function fallback
       try {
         const res = await getSavedStudentProfilesServerFn({
           data: { adminKey: effectiveAdminKey },

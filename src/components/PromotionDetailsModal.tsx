@@ -24,9 +24,19 @@ export function PromotionDetailsModal({ promotion, isOpen, onClose }: PromotionD
   const handleVisit = () => {
     // Silently record click analytics
     try {
-      recordPromotionClickServerFn({ data: { id: promotion.id } });
+      fetch("/api/promotions/click", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: promotion.id }),
+      }).catch(() => {
+        recordPromotionClickServerFn({ data: { id: promotion.id } }).catch(() => {});
+      });
     } catch {
-      // ignore
+      try {
+        recordPromotionClickServerFn({ data: { id: promotion.id } }).catch(() => {});
+      } catch {
+        // ignore
+      }
     }
 
     // Open target website safely in a new tab

@@ -69,12 +69,25 @@ export function trackWebsiteVisit(): void {
       }
 
       // 3. Dispatch to server in background
+      const payload = {
+        visitorId,
+        sessionId,
+        isNewSession,
+      };
+
+      try {
+        const resp = await fetch("/api/analytics/visit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (resp.ok) return;
+      } catch {
+        // Fall back to serverFn
+      }
+
       await recordVisitServerFn({
-        data: {
-          visitorId,
-          sessionId,
-          isNewSession,
-        },
+        data: payload,
       });
     } catch {
       // Silently ignore analytics network failures to maintain smooth user experience

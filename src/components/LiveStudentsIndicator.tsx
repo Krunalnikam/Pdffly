@@ -34,6 +34,26 @@ export function LiveStudentsIndicator() {
 
     const sendHeartbeat = async () => {
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
+
+      // 1. Try REST endpoint
+      try {
+        const resp = await fetch("/api/live/heartbeat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ visitorId }),
+        });
+        if (resp.ok) {
+          const json = await resp.json();
+          if (isMountedRef.current && json && typeof json.activeCount === "number") {
+            setLiveCount(json.activeCount);
+            return;
+          }
+        }
+      } catch {
+        // Fall back to serverFn
+      }
+
+      // 2. Server function fallback
       try {
         const res = await pingActiveStudentHeartbeatServerFn({
           data: { visitorId },
@@ -67,11 +87,16 @@ export function LiveStudentsIndicator() {
     // Notify server when student closes or navigates away
     const handleUnload = () => {
       try {
-        leaveActiveStudentServerFn({
-          data: { visitorId },
-        }).catch(() => {
-          // ignore
-        });
+        if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+          navigator.sendBeacon(
+            "/api/live/leave",
+            new Blob([JSON.stringify({ visitorId })], { type: "application/json" }),
+          );
+        } else {
+          leaveActiveStudentServerFn({
+            data: { visitorId },
+          }).catch(() => {});
+        }
       } catch {
         // ignore
       }

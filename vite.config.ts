@@ -5,12 +5,12 @@ import viteReact from "@vitejs/plugin-react";
 import tsConfigPaths from "vite-tsconfig-paths";
 import { nitro } from "nitro/vite";
 
-function adminApiPlugin(): Plugin {
+function pdflyApiPlugin(): Plugin {
   return {
-    name: "admin-api-dev-middleware",
+    name: "pdfly-api-dev-middleware",
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (!req.url?.startsWith("/api/admin/")) {
+        if (!req.url?.startsWith("/api/") && !req.url?.startsWith("/_serverFn/")) {
           return next();
         }
 
@@ -20,7 +20,10 @@ function adminApiPlugin(): Plugin {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
+        res.setHeader(
+          "Access-Control-Allow-Headers",
+          "Content-Type, Authorization, Accept, x-tsr-serverFn",
+        );
 
         if (req.method === "OPTIONS") {
           res.statusCode = 204;
@@ -45,37 +48,22 @@ function adminApiPlugin(): Plugin {
           }
         }
 
+        const query: Record<string, string> = {};
+        url.searchParams.forEach((val, key) => {
+          query[key] = val;
+        });
+
         try {
-          const { executeVerifyRecoveryCode, executeAdminPasswordReset, verifyAdminKey } =
-            await import("./src/lib/admin-auth-server");
+          const { handleApiRequest } = await import("./src/lib/api-router");
+          const result = await handleApiRequest({
+            method: req.method || "GET",
+            pathname,
+            body,
+            query,
+          });
 
-          if (pathname === "/api/admin/verify-recovery-code") {
-            const result = await executeVerifyRecoveryCode(String(body.recoveryCode || ""));
-            res.statusCode = result.success ? 200 : 400;
-            res.end(JSON.stringify(result));
-            return;
-          }
-
-          if (pathname === "/api/admin/reset-password") {
-            const result = await executeAdminPasswordReset(
-              String(body.resetToken || ""),
-              String(body.newPassword || ""),
-              String(body.confirmPassword || ""),
-            );
-            res.statusCode = result.success ? 200 : 400;
-            res.end(JSON.stringify(result));
-            return;
-          }
-
-          if (pathname === "/api/admin/verify-key") {
-            const authorized = await verifyAdminKey(String(body.adminKey || ""));
-            res.statusCode = 200;
-            res.end(JSON.stringify({ success: true, authorized }));
-            return;
-          }
-
-          res.statusCode = 404;
-          res.end(JSON.stringify({ success: false, error: `API route not found: ${pathname}` }));
+          res.statusCode = result.statusCode;
+          res.end(typeof result.body === "string" ? result.body : JSON.stringify(result.body));
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : "Internal Server Error";
           res.statusCode = 500;
@@ -111,7 +99,7 @@ export default defineConfig(({ command }) => {
       ],
     },
     plugins: [
-      adminApiPlugin(),
+      pdflyApiPlugin(),
       tailwindcss(),
       tsConfigPaths({ projects: ["./tsconfig.json"] }),
       tanstackStart({

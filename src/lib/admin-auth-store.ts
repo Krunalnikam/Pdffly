@@ -277,6 +277,13 @@ export function verifyRecoveryCode(inputCode?: string | null): boolean {
     return false;
   }
 
+  // 1. Check custom environment variable override if provided
+  const envRecoveryCode = process.env.ADMIN_RECOVERY_CODE?.trim().toUpperCase().replace(/\s+/g, "");
+  if (envRecoveryCode && normalized === envRecoveryCode) {
+    return true;
+  }
+
+  // 2. Check permanent PBKDF2 hash for PDFLY-ADMIN-8472-X9K6
   const computedHash = crypto
     .pbkdf2Sync(normalized, PERMANENT_RECOVERY_SALT, 100000, 64, "sha512")
     .toString("hex");

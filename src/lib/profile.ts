@@ -9,13 +9,24 @@ export const STUDENT_PROFILE_STORAGE_KEY = "pdfmaker_student_profile";
  */
 export async function syncProfileToServer(profile: StudentProfile): Promise<void> {
   if (!profile || !profile.enrollmentNumber || !profile.branch) return;
+  const payload = {
+    enrollmentNumber: profile.enrollmentNumber.trim(),
+    branch: profile.branch.trim().toUpperCase(),
+  };
+
   try {
-    await saveStudentProfileServerFn({
-      data: {
-        enrollmentNumber: profile.enrollmentNumber.trim(),
-        branch: profile.branch.trim().toUpperCase(),
-      },
+    const res = await fetch("/api/profile/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
+    if (res.ok) return;
+  } catch {
+    // Continue to serverFn fallback
+  }
+
+  try {
+    await saveStudentProfileServerFn({ data: payload });
   } catch (err) {
     // Non-blocking background sync failure
     console.warn("Could not sync student profile to server:", err);

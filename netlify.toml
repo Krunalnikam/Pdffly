@@ -19,6 +19,18 @@
 
 # Direct TanStack Start server RPC routes to Netlify Function
 [[redirects]]
+  from = "/_serverFn/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/_serverFn"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/_server/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
