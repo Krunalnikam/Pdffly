@@ -226,6 +226,139 @@ export function verifyRecoveryCode(candidate: string): boolean {
 }
 
 /**
+ * Creates and records a secure reset token session valid for 15 minutes.
+ */
+export function createResetTokenSession(): string {
+  const resetToken = crypto.randomBytes(32).toString("hex");
+  activeResetTokens.set(resetToken, {
+    expiresAt: Date.now() + 15 * 60 * 1000,
+  });
+  return resetToken;
+}
+
+/**
+ * Validates and consumes an active reset token session.
+ */
+export function validateAndConsumeResetToken(resetToken: string): boolean {
+  if (!resetToken || typeof resetToken !== "string") return false;
+  const tokenSession = activeResetTokens.get(resetToken);
+  const now = Date.now();
+
+  if (!tokenSession || now > tokenSession.expiresAt) {
+    if (tokenSession) activeResetTokens.delete(resetToken);
+    return false;
+  }
+  activeResetTokens.delete(resetToken);
+  return true;
+}
+
+/**
+ * Core Controller: Verify Admin Recovery Code
+ * Used across TanStack Start server functions, REST endpoints, and Netlify Functions.
+ */
+export function executeVerifyRecoveryCode(candidate: string): {
+  success: boolean;
+  resetToken?: string;
+  error?: string;
+} {
+  const normalized = String(candidate || "").trim();
+  if (!normalized) {
+    return {
+      success: false,
+      error: "Please enter your Admin Recovery Code.",
+    };
+  }
+
+  const isValid = verifyRecoveryCode(normalized);
+  if (!isValid) {
+    return {
+      success: false,
+      error: "Invalid Recovery Code. Please check the code and try again.",
+    };
+  }
+
+  const resetToken = createResetTokenSession();
+  return {
+    success: true,
+    resetToken,
+  };
+}
+
+/**
+ * Core Controller: Reset Admin Password
+ * Used across TanStack Start server functions, REST endpoints, and Netlify Functions.
+ */
+export async function executeAdminPasswordReset(
+  resetToken: string,
+  newPassword: string,
+  confirmPassword: string,
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  const token = String(resetToken || "").trim();
+  const pass = String(newPassword || "");
+  const confirm = String(confirmPassword || "");
+
+  if (!token) {
+    return {
+      success: false,
+      error: "Invalid or missing reset session. Please re-enter your Recovery Code.",
+    };
+  }
+  if (!pass) {
+    return {
+      success: false,
+      error: "New password cannot be empty.",
+    };
+  }
+  if (pass !== confirm) {
+    return {
+      success: false,
+      error: "Passwords do not match.",
+    };
+  }
+  if (pass.length < 8) {
+    return {
+      success: false,
+      error: "Password must be at least 8 characters long.",
+    };
+  }
+  const hasLetter = /[a-zA-Z]/.test(pass);
+  const hasNumber = /[0-9]/.test(pass);
+  if (!hasLetter || !hasNumber) {
+    return {
+      success: false,
+      error: "Password must contain at least one letter and one number.",
+    };
+  }
+
+  const isValidToken = validateAndConsumeResetToken(token);
+  if (!isValidToken) {
+    return {
+      success: false,
+      error: "Your reset session has expired. Please re-enter your Recovery Code.",
+    };
+  }
+
+  const salt = crypto.randomBytes(16).toString("hex");
+  const iterations = 100000;
+  const passwordHash = hashPassword(pass, salt, iterations);
+
+  const storedAuth: StoredAdminAuth = {
+    passwordHash,
+    salt,
+    iterations,
+    updatedAt: new Date().toISOString(),
+    changedVia: "recovery_code",
+  };
+
+  await writeStoredAuth(storedAuth);
+
+  return {
+    success: true,
+    message: "Password changed successfully.",
+  };
+}
+
+/**
  * Server Function: Verify Admin Recovery Code
  * Step 1: Validates the permanent recovery code and issues a short-lived reset token.
  */
@@ -243,20 +376,16 @@ export const verifyAdminRecoveryCodeServerFn = createServerFn({ method: "POST" }
     return { recoveryCode };
   })
   .handler(async ({ data }): Promise<{ success: boolean; resetToken: string }> => {
-    const isValid = verifyRecoveryCode(data.recoveryCode);
-    if (!isValid) {
-      throw new Error("Invalid Recovery Code. Please check the code and try again.");
+    const result = executeVerifyRecoveryCode(data.recoveryCode);
+    if (!result.success || !result.resetToken) {
+      throw new Error(
+        result.error || "Invalid Recovery Code. Please check the code and try again.",
+      );
     }
-
-    const now = Date.now();
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    activeResetTokens.set(resetToken, {
-      expiresAt: now + 15 * 60 * 1000, // 15 minutes to enter new password
-    });
 
     return {
       success: true,
-      resetToken,
+      resetToken: result.resetToken,
     };
   });
 
@@ -274,57 +403,20 @@ export const resetAdminPasswordServerFn = createServerFn({ method: "POST" })
     const newPassword = String(d?.newPassword || "");
     const confirmPassword = String(d?.confirmPassword || "");
 
-    if (!resetToken) {
-      throw new Error("Invalid or missing reset session. Please re-enter your Recovery Code.");
-    }
-    if (!newPassword) {
-      throw new Error("New password cannot be empty.");
-    }
-    if (newPassword !== confirmPassword) {
-      throw new Error("Passwords do not match.");
-    }
-
     return { resetToken, newPassword, confirmPassword };
   })
   .handler(async ({ data }): Promise<{ success: boolean; message: string }> => {
-    const tokenSession = activeResetTokens.get(data.resetToken);
-    const now = Date.now();
-
-    if (!tokenSession || now > tokenSession.expiresAt) {
-      if (tokenSession) activeResetTokens.delete(data.resetToken);
-      throw new Error("Your reset session has expired. Please re-enter your Recovery Code.");
+    const result = await executeAdminPasswordReset(
+      data.resetToken,
+      data.newPassword,
+      data.confirmPassword,
+    );
+    if (!result.success || !result.message) {
+      throw new Error(result.error || "Failed to reset password.");
     }
-
-    // Validate secure password requirements
-    if (data.newPassword.length < 8) {
-      throw new Error("Password must be at least 8 characters long.");
-    }
-    const hasLetter = /[a-zA-Z]/.test(data.newPassword);
-    const hasNumber = /[0-9]/.test(data.newPassword);
-    if (!hasLetter || !hasNumber) {
-      throw new Error("Password must contain at least one letter and one number.");
-    }
-
-    // Generate salt and PBKDF2 hash
-    const salt = crypto.randomBytes(16).toString("hex");
-    const iterations = 100000;
-    const passwordHash = hashPassword(data.newPassword, salt, iterations);
-
-    const storedAuth: StoredAdminAuth = {
-      passwordHash,
-      salt,
-      iterations,
-      updatedAt: new Date().toISOString(),
-      changedVia: "recovery_code",
-    };
-
-    await writeStoredAuth(storedAuth);
-
-    // Invalidate reset token immediately
-    activeResetTokens.delete(data.resetToken);
 
     return {
       success: true,
-      message: "Password changed successfully.",
+      message: result.message,
     };
   });

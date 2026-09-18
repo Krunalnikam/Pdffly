@@ -160,20 +160,30 @@ async function postbuild() {
   }
 
   // 3. Ensure Netlify _redirects configuration exists in all relevant directories
-  // /* -> /index.html 200 ensures client-side routing fallback for Netlify
-  const redirectsContent = "/*    /index.html   200\n";
+  // Direct /api/* and /_server/* to Netlify Functions before the SPA fallback
+  const redirectsContent = [
+    "/api/*          /.netlify/functions/api/:splat  200!",
+    "/_server/*      /.netlify/functions/api/:splat  200!",
+    "/_server        /.netlify/functions/api         200!",
+    "/*              /index.html                     200",
+    "",
+  ].join("\n");
   fs.writeFileSync(path.join(publicDir, "_redirects"), redirectsContent, "utf-8");
   fs.writeFileSync(path.join(distDir, "_redirects"), redirectsContent, "utf-8");
   fs.writeFileSync(path.join(clientDir, "_redirects"), redirectsContent, "utf-8");
 
-  // Also persist to source public/_redirects if not already present
+  // Also persist to source public/_redirects
   const srcPublicRedirects = path.resolve("public", "_redirects");
-  if (!fs.existsSync(srcPublicRedirects)) {
-    fs.writeFileSync(srcPublicRedirects, redirectsContent, "utf-8");
-  }
+  fs.writeFileSync(srcPublicRedirects, redirectsContent, "utf-8");
 
   // 4. Ensure Netlify _headers exists for cache control
-  const headersContent = "/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n";
+  const headersContent = [
+    "/assets/*",
+    "  Cache-Control: public, max-age=31536000, immutable",
+    "/api/*",
+    "  Cache-Control: no-store, no-cache, must-revalidate",
+    "",
+  ].join("\n");
   fs.writeFileSync(path.join(publicDir, "_headers"), headersContent, "utf-8");
   fs.writeFileSync(path.join(distDir, "_headers"), headersContent, "utf-8");
   fs.writeFileSync(path.join(clientDir, "_headers"), headersContent, "utf-8");

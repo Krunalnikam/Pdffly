@@ -66,6 +66,21 @@ export function AdminForgotPasswordModal({
     }
   }, [isOpen]);
 
+  // Helper to sanitize any error message preventing HTML leakage (such as Netlify 404 HTML)
+  const sanitizeErrorMessage = (err: unknown, fallback: string): string => {
+    if (!err) return fallback;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      msg.includes("<!DOCTYPE") ||
+      msg.includes("<html") ||
+      msg.includes("Page not found") ||
+      msg.includes("<body")
+    ) {
+      return "Unable to connect to the authentication service. Please check your network and try again.";
+    }
+    return msg || fallback;
+  };
+
   // Step 1: Handle Verifying Recovery Code
   const handleVerifyRecoveryCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,17 +94,55 @@ export function AdminForgotPasswordModal({
     setErrorMessage(null);
 
     try {
-      const res = await verifyAdminRecoveryCodeServerFn({
-        data: { recoveryCode: trimmed },
-      });
+      let resetTokenReceived = "";
 
-      if (res && res.success && res.resetToken) {
-        setResetToken(res.resetToken);
+      // 1. Primary: Call the production REST API endpoint
+      try {
+        const response = await fetch("/api/admin/verify-recovery-code", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ recoveryCode: trimmed }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          if (data && data.success && data.resetToken) {
+            resetTokenReceived = data.resetToken;
+          } else if (data && data.error) {
+            throw new Error(data.error);
+          }
+        }
+      } catch (apiErr: unknown) {
+        // If API explicitly returned a validation error message from JSON, re-throw it
+        const apiMsg = apiErr instanceof Error ? apiErr.message : "";
+        if (apiMsg && !apiMsg.includes("<html") && !apiMsg.includes("<!DOCTYPE")) {
+          throw apiErr;
+        }
+      }
+
+      // 2. Secondary fallback: Call TanStack Start server function if direct REST did not return token
+      if (!resetTokenReceived) {
+        const res = await verifyAdminRecoveryCodeServerFn({
+          data: { recoveryCode: trimmed },
+        });
+
+        if (res && res.success && res.resetToken) {
+          resetTokenReceived = res.resetToken;
+        }
+      }
+
+      if (resetTokenReceived) {
+        setResetToken(resetTokenReceived);
         setStep("new_password");
+      } else {
+        throw new Error("Invalid Recovery Code. Please check the code and try again.");
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Invalid Recovery Code. Please try again.";
-      setErrorMessage(msg);
+      setErrorMessage(sanitizeErrorMessage(err, "Invalid Recovery Code. Please try again."));
     } finally {
       setIsVerifyingCode(false);
     }
@@ -120,20 +173,61 @@ export function AdminForgotPasswordModal({
     setIsChangingPassword(true);
 
     try {
-      const res = await resetAdminPasswordServerFn({
-        data: {
-          resetToken,
-          newPassword,
-          confirmPassword,
-        },
-      });
+      let resetSuccess = false;
 
-      if (res && res.success) {
+      // 1. Primary: Call the production REST API endpoint
+      try {
+        const response = await fetch("/api/admin/reset-password", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            resetToken,
+            newPassword,
+            confirmPassword,
+          }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          if (data && data.success) {
+            resetSuccess = true;
+          } else if (data && data.error) {
+            throw new Error(data.error);
+          }
+        }
+      } catch (apiErr: unknown) {
+        const apiMsg = apiErr instanceof Error ? apiErr.message : "";
+        if (apiMsg && !apiMsg.includes("<html") && !apiMsg.includes("<!DOCTYPE")) {
+          throw apiErr;
+        }
+      }
+
+      // 2. Secondary fallback: Call TanStack Start server function
+      if (!resetSuccess) {
+        const res = await resetAdminPasswordServerFn({
+          data: {
+            resetToken,
+            newPassword,
+            confirmPassword,
+          },
+        });
+
+        if (res && res.success) {
+          resetSuccess = true;
+        }
+      }
+
+      if (resetSuccess) {
         setStep("success");
+      } else {
+        throw new Error("Failed to change password. Please try again.");
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to change password.";
-      setErrorMessage(msg);
+      setErrorMessage(sanitizeErrorMessage(err, "Failed to change password."));
     } finally {
       setIsChangingPassword(false);
     }
