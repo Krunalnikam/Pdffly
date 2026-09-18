@@ -5,29 +5,20 @@ import { getStore } from "@netlify/blobs";
 
 const BLOB_STORE_NAME = "pdfly-storage";
 
-// In-memory memory cache for fast reads across serverless invocations
+// In-memory cache for fast reads across serverless invocations
 const memoryCache = new Map<string, unknown>();
 
-let cachedBlobStore: ReturnType<typeof getStore> | null = null;
-let blobsDisabled = false;
-
-function getBlobStore(): ReturnType<typeof getStore> | null {
-  if (blobsDisabled) return null;
-  if (!cachedBlobStore) {
-    try {
-      const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
-      const token = process.env.NETLIFY_BLOBS_TOKEN || process.env.NETLIFY_AUTH_TOKEN;
-      if (siteID && token) {
-        cachedBlobStore = getStore({ name: BLOB_STORE_NAME, siteID, token });
-      } else {
-        cachedBlobStore = getStore({ name: BLOB_STORE_NAME });
-      }
-    } catch {
-      cachedBlobStore = null;
-      blobsDisabled = true;
+export function getBlobStore(): ReturnType<typeof getStore> | null {
+  try {
+    const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
+    const token = process.env.NETLIFY_BLOBS_TOKEN || process.env.NETLIFY_AUTH_TOKEN;
+    if (siteID && token) {
+      return getStore({ name: BLOB_STORE_NAME, siteID, token, consistency: "strong" });
     }
+    return getStore({ name: BLOB_STORE_NAME, consistency: "strong" });
+  } catch {
+    return null;
   }
-  return cachedBlobStore;
 }
 
 export function getDataDir(): string {
@@ -39,29 +30,30 @@ export function getDataDir(): string {
 
 /**
  * Reads JSON data for a specific store key.
- * Checks Netlify Blobs -> Local primary file -> Bundled seed file -> Fallback default.
+ * Checks Netlify Blobs (authoritative) -> Memory cache -> Primary filesystem -> Bundled seed file -> Fallback default.
  */
 export async function readStorageData<T>(
   storeKey: string,
   fileName: string,
   defaultValue: T,
+  bypassMemoryCache: boolean = false,
 ): Promise<T> {
   // 1. Check Netlify Blobs persistent cloud storage
   const store = getBlobStore();
   if (store) {
     try {
-      const blobData = await store.get(storeKey, { type: "json" });
+      const blobData = await store.get(storeKey, { type: "json", consistency: "strong" });
       if (blobData !== null && blobData !== undefined) {
         memoryCache.set(storeKey, blobData);
         return blobData as T;
       }
     } catch {
-      // Blobs unavailable in current container
+      // Blobs unavailable or key not found
     }
   }
 
-  // 2. Check memory cache
-  if (memoryCache.has(storeKey)) {
+  // 2. Check memory cache (unless bypassed)
+  if (!bypassMemoryCache && memoryCache.has(storeKey)) {
     return memoryCache.get(storeKey) as T;
   }
 

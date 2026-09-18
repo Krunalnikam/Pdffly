@@ -4,24 +4,10 @@ import {
   pingActiveStudentHeartbeatServerFn,
   leaveActiveStudentServerFn,
 } from "@/lib/analytics-server";
+import { getOrCreateVisitorId } from "@/lib/analytics";
 
-const VISITOR_ID_KEY = "pdfmaker_anon_visitor_id";
 const HEARTBEAT_INTERVAL_MS = 15000; // 15 seconds for timely updates
 const THRESHOLD_COUNT = 50; // Only display if 50 or more active students
-
-function getOrCreateVisitorId(): string {
-  if (typeof window === "undefined") return "anon";
-  try {
-    let id = localStorage.getItem(VISITOR_ID_KEY);
-    if (!id) {
-      id = `vis_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
-      localStorage.setItem(VISITOR_ID_KEY, id);
-    }
-    return id;
-  } catch {
-    return "vis_anon";
-  }
-}
 
 export function LiveStudentsIndicator() {
   const { t } = useLanguage();

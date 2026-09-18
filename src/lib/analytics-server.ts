@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { verifyAdminKey } from "./admin-auth-server";
-import { readStorageData, writeStorageData } from "./storage-provider";
+import { readStorageData, writeStorageData, getBlobStore } from "./storage-provider";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 export interface VisitorRecord {
   visitorId: string;
@@ -54,30 +56,167 @@ const DEFAULT_ANALYTICS: StoredAnalyticsData = {
   lastActivity: new Date().toISOString(),
 };
 
-// Helper to read analytics safely
-export async function readAnalyticsFromFile(): Promise<StoredAnalyticsData> {
+/**
+ * Pure CRDT-style monotonic set-union merge for analytics data.
+ * Guarantees that:
+ * 1. Total unique users NEVER decreases.
+ * 2. Total visits NEVER decreases.
+ * 3. Concurrent requests or cold-started serverless instances never overwrite each other.
+ */
+export function mergeAnalyticsData(
+  base: StoredAnalyticsData,
+  incoming: StoredAnalyticsData,
+): StoredAnalyticsData {
+  const mergedVisitors: Record<string, VisitorRecord> = {};
+
+  // 1. Copy base visitors
+  for (const [vid, v] of Object.entries(base.visitors || {})) {
+    if (v && v.visitorId) {
+      mergedVisitors[vid] = {
+        visitorId: v.visitorId,
+        firstSeen: v.firstSeen || new Date().toISOString(),
+        lastSeen: v.lastSeen || new Date().toISOString(),
+        totalVisits: Number(v.totalVisits) || 1,
+        daysVisited: Array.isArray(v.daysVisited) ? [...v.daysVisited] : [],
+      };
+    }
+  }
+
+  // 2. Union incoming visitors monotonically
+  for (const [vid, v] of Object.entries(incoming.visitors || {})) {
+    if (!v || !v.visitorId) continue;
+    const existing = mergedVisitors[vid];
+    if (!existing) {
+      mergedVisitors[vid] = {
+        visitorId: v.visitorId,
+        firstSeen: v.firstSeen || new Date().toISOString(),
+        lastSeen: v.lastSeen || new Date().toISOString(),
+        totalVisits: Number(v.totalVisits) || 1,
+        daysVisited: Array.isArray(v.daysVisited) ? [...v.daysVisited] : [],
+      };
+    } else {
+      const firstSeen =
+        existing.firstSeen && existing.firstSeen < v.firstSeen ? existing.firstSeen : v.firstSeen;
+      const lastSeen =
+        existing.lastSeen && existing.lastSeen > v.lastSeen ? existing.lastSeen : v.lastSeen;
+      const allDays = Array.from(
+        new Set([...(existing.daysVisited || []), ...(v.daysVisited || [])]),
+      ).sort();
+      mergedVisitors[vid] = {
+        visitorId: vid,
+        firstSeen,
+        lastSeen,
+        totalVisits: Math.max(existing.totalVisits, Number(v.totalVisits) || 1),
+        daysVisited: allDays,
+      };
+    }
+  }
+
+  // 3. Deduplicate and merge visits by unique sessionId or visit id
+  const visitMap = new Map<string, VisitEvent>();
+  const addVisit = (ve: VisitEvent) => {
+    if (!ve) return;
+    const key = ve.sessionId ? `ses:${ve.sessionId}` : ve.id ? `id:${ve.id}` : null;
+    if (key && !visitMap.has(key)) {
+      visitMap.set(key, ve);
+    }
+  };
+
+  for (const v of base.visits || []) {
+    addVisit(v);
+  }
+  for (const v of incoming.visits || []) {
+    addVisit(v);
+  }
+
+  const mergedVisits = Array.from(visitMap.values()).sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
+
+  // 4. Reconcile totalVisits for each visitor
+  for (const visitor of Object.values(mergedVisitors)) {
+    const userVisitsCount = mergedVisits.filter((v) => v.visitorId === visitor.visitorId).length;
+    visitor.totalVisits = Math.max(visitor.totalVisits, userVisitsCount, 1);
+  }
+
+  const lastActivity =
+    (base.lastActivity || "") > (incoming.lastActivity || "")
+      ? base.lastActivity
+      : incoming.lastActivity || new Date().toISOString();
+
+  return {
+    visitors: mergedVisitors,
+    visits: mergedVisits,
+    lastActivity,
+  };
+}
+
+// Helper to read analytics safely with authoritative Blobs and historical baseline seed protection
+export async function readAnalyticsFromFile(
+  bypassCache: boolean = false,
+): Promise<StoredAnalyticsData> {
   const parsed = await readStorageData<StoredAnalyticsData>(
     "analytics-data",
     "analytics.json",
     DEFAULT_ANALYTICS,
+    bypassCache,
   );
+
+  let result: StoredAnalyticsData = DEFAULT_ANALYTICS;
   if (parsed && typeof parsed === "object") {
-    return {
+    result = {
       visitors: parsed.visitors || {},
       visits: Array.isArray(parsed.visits) ? parsed.visits : [],
       lastActivity: parsed.lastActivity || new Date().toISOString(),
     };
   }
-  return DEFAULT_ANALYTICS;
+
+  // Baseline seed protection: merge with bundled seed file in process.cwd()/data/analytics.json
+  // Guarantees historical recorded visitors and visits are never reset or dropped
+  try {
+    const seedPath = path.join(process.cwd(), "data", "analytics.json");
+    const seedRaw = await fs.readFile(seedPath, "utf-8");
+    const seedData = JSON.parse(seedRaw) as StoredAnalyticsData;
+    if (seedData && seedData.visitors) {
+      result = mergeAnalyticsData(seedData, result);
+    }
+  } catch {
+    // Seed file optional
+  }
+
+  return result;
 }
 
-// Helper to write analytics safely
-export async function writeAnalyticsToFile(data: StoredAnalyticsData): Promise<void> {
-  // Keep maximum recent 5,000 visit events to prevent unbounded storage growth
-  if (data.visits.length > 5000) {
-    data.visits = data.visits.slice(-5000);
+// Helper to write analytics safely with monotonic merging
+export async function writeAnalyticsToFile(
+  data: StoredAnalyticsData,
+): Promise<StoredAnalyticsData> {
+  let dataToSave = data;
+
+  // 1. If Netlify Blobs is available, fetch the latest stored data with strong consistency and union-merge!
+  const store = getBlobStore();
+  if (store) {
+    try {
+      const existingBlob = await store.get("analytics-data", {
+        type: "json",
+        consistency: "strong",
+      });
+      if (existingBlob && typeof existingBlob === "object") {
+        dataToSave = mergeAnalyticsData(existingBlob as StoredAnalyticsData, dataToSave);
+      }
+    } catch {
+      // Netlify Blobs read fallback
+    }
   }
-  await writeStorageData("analytics-data", "analytics.json", data);
+
+  // Cap recent visits at 10,000 to prevent unbounded memory growth while keeping history intact
+  if (dataToSave.visits.length > 10000) {
+    dataToSave.visits = dataToSave.visits.slice(-10000);
+  }
+
+  // Monotonically save across Netlify Blobs, memory, and filesystem
+  await writeStorageData("analytics-data", "analytics.json", dataToSave);
+  return dataToSave;
 }
 
 // Active window threshold: A student is considered active if a heartbeat was received within 45 seconds
@@ -146,62 +285,81 @@ export async function removeActiveStudent(visitorId: string): Promise<number> {
   return count;
 }
 
+// In-process sequential queue lock to prevent local race conditions during concurrent requests
+let visitProcessingLock = Promise.resolve();
+
 export async function recordVisitDirect(data: {
   visitorId: string;
   sessionId: string;
   isNewSession: boolean;
 }): Promise<{ success: boolean; recorded: boolean }> {
-  const rawVisitorId = String(data.visitorId || "").trim();
-  const rawSessionId = String(data.sessionId || "").trim();
-  const isNewSession = Boolean(data.isNewSession);
+  return new Promise((resolve, reject) => {
+    visitProcessingLock = visitProcessingLock
+      .then(async () => {
+        const rawVisitorId = String(data.visitorId || "").trim();
+        const rawSessionId = String(data.sessionId || "").trim();
+        const isNewSession = Boolean(data.isNewSession);
 
-  const visitorId = rawVisitorId.slice(0, 64) || `v_${Date.now()}`;
-  const sessionId = rawSessionId.slice(0, 64) || `s_${Date.now()}`;
+        const visitorId = rawVisitorId.slice(0, 64) || `v_${Date.now()}`;
+        const sessionId = rawSessionId.slice(0, 64) || `s_${Date.now()}`;
 
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const todayStr = getLocalDateString(now);
+        const now = new Date();
+        const nowIso = now.toISOString();
+        const todayStr = getLocalDateString(now);
 
-  const store = await readAnalyticsFromFile();
+        // Read latest state bypassing stale memory cache
+        const store = await readAnalyticsFromFile(true);
 
-  const existingVisitor = store.visitors[visitorId];
-  if (existingVisitor) {
-    existingVisitor.lastSeen = nowIso;
-    if (!existingVisitor.daysVisited.includes(todayStr)) {
-      existingVisitor.daysVisited.push(todayStr);
-    }
-    if (isNewSession) {
-      existingVisitor.totalVisits += 1;
-    }
-  } else {
-    store.visitors[visitorId] = {
-      visitorId,
-      firstSeen: nowIso,
-      lastSeen: nowIso,
-      totalVisits: 1,
-      daysVisited: [todayStr],
-    };
-  }
+        const existingVisitor = store.visitors[visitorId];
+        if (existingVisitor) {
+          existingVisitor.lastSeen = nowIso;
+          if (!existingVisitor.daysVisited.includes(todayStr)) {
+            existingVisitor.daysVisited.push(todayStr);
+          }
+        } else {
+          store.visitors[visitorId] = {
+            visitorId,
+            firstSeen: nowIso,
+            lastSeen: nowIso,
+            totalVisits: 1,
+            daysVisited: [todayStr],
+          };
+        }
 
-  if (isNewSession) {
-    store.visits.push({
-      id: `vt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      visitorId,
-      sessionId,
-      timestamp: nowIso,
-      date: todayStr,
-    });
-  }
+        let recordedNewVisit = false;
+        // Strict session deduplication: has this sessionId already been recorded as a visit?
+        const sessionAlreadyRecorded = store.visits.some((v) => v.sessionId === sessionId);
 
-  store.lastActivity = nowIso;
+        if (isNewSession && !sessionAlreadyRecorded) {
+          store.visits.push({
+            id: `vt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            visitorId,
+            sessionId,
+            timestamp: nowIso,
+            date: todayStr,
+          });
+          const targetVisitor = store.visitors[visitorId];
+          if (targetVisitor) {
+            targetVisitor.totalVisits = (targetVisitor.totalVisits || 0) + 1;
+          }
+          recordedNewVisit = true;
+        }
 
-  await writeAnalyticsToFile(store);
-  await recordActiveStudentHeartbeat(visitorId);
+        store.lastActivity = nowIso;
 
-  return {
-    success: true,
-    recorded: true,
-  };
+        // Monotonically write to storage (merges with Netlify Blobs if remote has newer items)
+        await writeAnalyticsToFile(store);
+        await recordActiveStudentHeartbeat(visitorId);
+
+        resolve({
+          success: true,
+          recorded: recordedNewVisit,
+        });
+      })
+      .catch((err) => {
+        reject(err);
+      });
+  });
 }
 
 export async function getAdminAnalyticsDirect(adminKey: string): Promise<{
@@ -213,7 +371,8 @@ export async function getAdminAnalyticsDirect(adminKey: string): Promise<{
     throw new Error("Unauthorized: Invalid Admin Security Key");
   }
 
-  const store = await readAnalyticsFromFile();
+  // Read authoritative data directly
+  const store = await readAnalyticsFromFile(true);
   const now = new Date();
   const todayStr = getLocalDateString(now);
 

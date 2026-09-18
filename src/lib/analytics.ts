@@ -1,13 +1,35 @@
 import { recordVisitServerFn } from "./analytics-server";
 
-const VISITOR_ID_KEY = "pdfmaker_anon_visitor_id";
-const SESSION_ID_KEY = "pdfmaker_anon_session_id";
-const LAST_PING_KEY = "pdfmaker_last_session_ping";
+export const VISITOR_ID_KEY = "pdfly_anon_visitor_id";
+export const LEGACY_VISITOR_ID_KEY = "pdfmaker_anon_visitor_id";
+export const COOKIE_NAME = "pdfly_vid";
 
-// 30 minutes in milliseconds for session expiration
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-// Minimum 10 minutes between heartbeats in same session
-const THROTTLE_PING_MS = 10 * 60 * 1000;
+export const SESSION_ID_KEY = "pdfly_anon_session_id";
+export const SESSION_LAST_ACTIVE_KEY = "pdfly_session_last_active";
+
+// 30 minutes in milliseconds for session inactivity expiration
+export const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+
+function getCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  try {
+    const match = document.cookie.match(new RegExp("(^|;\\s*)" + name + "=([^;]*)"));
+    return match ? decodeURIComponent(match[2]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setCookie(name: string, value: string, days: number = 365): void {
+  if (typeof document === "undefined") return;
+  try {
+    const expires = new Date(Date.now() + days * 864e5).toUTCString();
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax${secure}`;
+  } catch {
+    // Cookie write blocked
+  }
+}
 
 function generateRandomId(prefix: string): string {
   const rand = Math.random().toString(36).substring(2, 10);
@@ -16,65 +38,144 @@ function generateRandomId(prefix: string): string {
 }
 
 /**
+ * Gets or creates a persistent anonymous user ID stored in both localStorage and first-party cookie.
+ * Ensures the same user on the same device/browser remains ONE unique user across reloads and visits.
+ */
+export function getOrCreateVisitorId(): string {
+  if (typeof window === "undefined") return "vis_anon";
+
+  let visitorId = "";
+
+  // 1. Try modern localStorage key
+  try {
+    visitorId = localStorage.getItem(VISITOR_ID_KEY) || "";
+  } catch {
+    // localStorage may be disabled
+  }
+
+  // 2. Try legacy localStorage key for backwards compatibility
+  if (!visitorId) {
+    try {
+      visitorId = localStorage.getItem(LEGACY_VISITOR_ID_KEY) || "";
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Try first-party cookie
+  if (!visitorId) {
+    visitorId = getCookie(COOKIE_NAME) || "";
+  }
+
+  // 4. Generate new stable anonymous ID if not found
+  if (!visitorId) {
+    visitorId = generateRandomId("vis");
+  }
+
+  // Synchronize across both localStorage and Cookie for maximum persistence
+  try {
+    localStorage.setItem(VISITOR_ID_KEY, visitorId);
+    localStorage.setItem(LEGACY_VISITOR_ID_KEY, visitorId);
+  } catch {
+    // ignore
+  }
+  setCookie(COOKIE_NAME, visitorId, 365);
+
+  return visitorId;
+}
+
+// In-memory guard to deduplicate tracking calls during the same page load
+let hasTrackedThisPageLoad = false;
+let trackingPromise: Promise<void> | null = null;
+
+/**
  * Initializes and records website visitor analytics in the background.
  * Privacy-friendly: Does not collect PII, passwords, documents, or personal data.
+ * - Same browser/device: 1 unique user.
+ * - Refresh: same active session (Visits stays unchanged).
+ * - Leave and return in a new session (>30 min or after tab close): Visits +1.
+ * - Admin route access: strictly excluded.
  */
-export function trackWebsiteVisit(): void {
-  if (typeof window === "undefined") return;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+export function trackWebsiteVisit(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (typeof navigator !== "undefined" && !navigator.onLine) return Promise.resolve();
+
+  // STRICT ADMIN EXCLUSION: Admin dashboard access must NEVER count as a public visitor or session
+  const pathname = window.location.pathname.toLowerCase();
+  if (
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname.includes("/admin") ||
+    window.location.hash.toLowerCase().includes("admin")
+  ) {
+    return Promise.resolve();
+  }
+  try {
+    if (sessionStorage.getItem("pdfmaker_admin_passkey")) {
+      return Promise.resolve();
+    }
+  } catch {
+    // ignore
+  }
+
+  // Deduplicate calls within the same page load
+  if (hasTrackedThisPageLoad && trackingPromise) {
+    return trackingPromise;
+  }
+  hasTrackedThisPageLoad = true;
 
   const runTracking = async () => {
     try {
-      // 1. Get or create persistent anonymous visitor ID
-      let visitorId = "";
-      try {
-        visitorId = localStorage.getItem(VISITOR_ID_KEY) || "";
-        if (!visitorId) {
-          visitorId = generateRandomId("vis");
-          localStorage.setItem(VISITOR_ID_KEY, visitorId);
-        }
-      } catch {
-        // Fallback if localStorage is disabled
-        visitorId = generateRandomId("vis_tmp");
-      }
-
-      // 2. Check session status
+      const visitorId = getOrCreateVisitorId();
       const now = Date.now();
+
+      // Check session status
       let sessionId = "";
       let isNewSession = false;
 
-      try {
-        const storedSession = sessionStorage.getItem(SESSION_ID_KEY);
-        const lastPingStr = sessionStorage.getItem(LAST_PING_KEY);
-        const lastPing = lastPingStr ? parseInt(lastPingStr, 10) : 0;
+      let storedSession: string | null = null;
+      let lastActive = 0;
 
-        if (!storedSession || isNaN(lastPing) || now - lastPing > SESSION_TIMEOUT_MS) {
-          // New session
-          sessionId = generateRandomId("ses");
-          sessionStorage.setItem(SESSION_ID_KEY, sessionId);
-          sessionStorage.setItem(LAST_PING_KEY, String(now));
-          isNewSession = true;
-        } else {
-          sessionId = storedSession;
-          // If within session and recently pinged within throttle window, skip redundant calls
-          if (now - lastPing < THROTTLE_PING_MS) {
-            return;
-          }
-          sessionStorage.setItem(LAST_PING_KEY, String(now));
-          isNewSession = false;
-        }
+      try {
+        storedSession = sessionStorage.getItem(SESSION_ID_KEY);
+        const lastActiveStr =
+          localStorage.getItem(SESSION_LAST_ACTIVE_KEY) ||
+          sessionStorage.getItem(SESSION_LAST_ACTIVE_KEY);
+        lastActive = lastActiveStr ? parseInt(lastActiveStr, 10) : 0;
       } catch {
-        sessionId = generateRandomId("ses_tmp");
-        isNewSession = true;
+        // Storage access error
       }
 
-      // 3. Dispatch to server in background
+      if (!storedSession || isNaN(lastActive) || now - lastActive > SESSION_TIMEOUT_MS) {
+        // Brand new session: either first visit, or user returned after > 30 minutes of inactivity
+        sessionId = generateRandomId("ses");
+        isNewSession = true;
+        try {
+          sessionStorage.setItem(SESSION_ID_KEY, sessionId);
+          sessionStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(now));
+          localStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(now));
+        } catch {
+          // ignore
+        }
+      } else {
+        // Existing active session within 30 minutes timeout
+        sessionId = storedSession;
+        isNewSession = false;
+        try {
+          sessionStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(now));
+          localStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(now));
+        } catch {
+          // ignore
+        }
+      }
+
       const payload = {
         visitorId,
         sessionId,
         isNewSession,
       };
 
+      // 1. Dispatch to REST endpoint
       try {
         const resp = await fetch("/api/analytics/visit", {
           method: "POST",
@@ -86,6 +187,7 @@ export function trackWebsiteVisit(): void {
         // Fall back to serverFn
       }
 
+      // 2. Server function fallback
       await recordVisitServerFn({
         data: payload,
       });
@@ -94,12 +196,17 @@ export function trackWebsiteVisit(): void {
     }
   };
 
-  // Run non-blocking when browser is idle
-  if ("requestIdleCallback" in window) {
-    window.requestIdleCallback(() => {
-      runTracking();
-    });
-  } else {
-    setTimeout(runTracking, 500);
-  }
+  trackingPromise = new Promise<void>((resolve) => {
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(() => {
+        runTracking().finally(resolve);
+      });
+    } else {
+      setTimeout(() => {
+        runTracking().finally(resolve);
+      }, 500);
+    }
+  });
+
+  return trackingPromise;
 }

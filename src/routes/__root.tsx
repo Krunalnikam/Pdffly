@@ -188,6 +188,17 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname.toLowerCase();
+      if (
+        path === "/admin" ||
+        path.startsWith("/admin/") ||
+        path.startsWith("/admin") ||
+        window.location.hash.toLowerCase().includes("admin")
+      ) {
+        return;
+      }
+    }
     trackWebsiteVisit();
   }, []);
 
