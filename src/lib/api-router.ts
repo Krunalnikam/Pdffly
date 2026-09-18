@@ -317,9 +317,11 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
     // Analytics & Live Sessions Endpoints
     // -------------------------------------------------------------
     if (pathname === "/api/analytics/visit" && method === "POST") {
+      const eventId = String(body.visitEventId || body.sessionId || "").trim();
       const result = await recordVisitDirect({
         visitorId: String(body.visitorId || ""),
-        sessionId: String(body.sessionId || ""),
+        visitEventId: eventId,
+        sessionId: eventId,
         isNewSession: Boolean(body.isNewSession),
       });
       return {

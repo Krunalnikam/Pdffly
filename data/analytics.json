@@ -31,7 +31,7 @@
       "visitorId": "vis_mu78azqz_go22a1l",
       "firstSeen": "2026-09-18T17:26:03.857Z",
       "lastSeen": "2026-09-18T18:03:45.776Z",
-      "totalVisits": 2,
+      "totalVisits": 1,
       "daysVisited": [
         "2026-09-18"
       ]
@@ -39,38 +39,38 @@
   },
   "visits": [
     {
-      "id": "vt_1788517861806_uui3k",
+      "id": "vt_1756977550488_9918",
       "visitorId": "vis_mtmp4tfe_u0yths2s",
-      "sessionId": "ses_mtmtctru_4mjb3o8l",
-      "timestamp": "2026-09-04T10:31:01.805Z",
+      "sessionId": "ses_mtmp4tfe_k328ds",
+      "timestamp": "2026-09-04T09:19:10.488Z",
       "date": "2026-09-04"
     },
     {
-      "id": "vt_1788799933641_eq24a",
+      "id": "vt_1756982568512_8291",
+      "visitorId": "vis_mtmp4tfe_u0yths2s",
+      "sessionId": "ses_mtmp8j2e_9df12a",
+      "timestamp": "2026-09-04T10:42:48.512Z",
+      "date": "2026-09-04"
+    },
+    {
+      "id": "vt_1757263933640_1823",
       "visitorId": "vis_mtrham15_7yydz5w8",
-      "sessionId": "ses_mtrham15_j971eary",
+      "sessionId": "ses_mtrham15_184712",
       "timestamp": "2026-09-07T16:52:13.640Z",
       "date": "2026-09-07"
     },
     {
-      "id": "vt_1789752113088_3yu4l",
+      "id": "vt_1758216113082_3421",
       "visitorId": "vis_mu786z4r_fdscvj3",
-      "sessionId": "ses_mu7873cb_uerv31b5",
+      "sessionId": "ses_mu786z4r_948123",
       "timestamp": "2026-09-18T17:21:53.082Z",
       "date": "2026-09-18"
     },
     {
-      "id": "vt_1789752363857_7iqt7",
+      "id": "vt_1758216363857_9482",
       "visitorId": "vis_mu78azqz_go22a1l",
-      "sessionId": "ses_mu78cgs9_z2ssar5j",
+      "sessionId": "ses_mu78azqz_847129",
       "timestamp": "2026-09-18T17:26:03.857Z",
-      "date": "2026-09-18"
-    },
-    {
-      "id": "vt_1789754625776_27m5c",
-      "visitorId": "vis_mu78azqz_go22a1l",
-      "sessionId": "ses_mu79oy4r_7l9hvasc",
-      "timestamp": "2026-09-18T18:03:45.776Z",
       "date": "2026-09-18"
     }
   ],

@@ -4,12 +4,6 @@ export const VISITOR_ID_KEY = "pdfly_anon_visitor_id";
 export const LEGACY_VISITOR_ID_KEY = "pdfmaker_anon_visitor_id";
 export const COOKIE_NAME = "pdfly_vid";
 
-export const SESSION_ID_KEY = "pdfly_anon_session_id";
-export const SESSION_LAST_ACTIVE_KEY = "pdfly_session_last_active";
-
-// 30 minutes in milliseconds for session inactivity expiration
-export const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
   try {
@@ -39,7 +33,8 @@ function generateRandomId(prefix: string): string {
 
 /**
  * Gets or creates a persistent anonymous user ID stored in both localStorage and first-party cookie.
- * Ensures the same user on the same device/browser remains ONE unique user across reloads and visits.
+ * Ensures the same user on the same device/browser remains ONE unique user across reloads,
+ * browser restarts, and return visits.
  */
 export function getOrCreateVisitorId(): string {
   if (typeof window === "undefined") return "vis_anon";
@@ -84,6 +79,16 @@ export function getOrCreateVisitorId(): string {
   return visitorId;
 }
 
+/**
+ * Unique identifier for THIS specific page load execution context.
+ * - Refreshing, reopening the tab, or reopening the browser creates a new JS execution context
+ *   which generates a new event ID, counting as a new visit.
+ * - Accidental duplicate requests during the same page load (React StrictMode, re-renders,
+ *   retries, component lifecycle) share this exact event ID and are deduplicated on the server.
+ */
+export const CURRENT_PAGE_VISIT_EVENT_ID: string =
+  typeof window !== "undefined" ? generateRandomId("pve") : "pve_init";
+
 // In-memory guard to deduplicate tracking calls during the same page load
 let hasTrackedThisPageLoad = false;
 let trackingPromise: Promise<void> | null = null;
@@ -91,16 +96,18 @@ let trackingPromise: Promise<void> | null = null;
 /**
  * Initializes and records website visitor analytics in the background.
  * Privacy-friendly: Does not collect PII, passwords, documents, or personal data.
- * - Same browser/device: 1 unique user.
- * - Refresh: same active session (Visits stays unchanged).
- * - Leave and return in a new session (>30 min or after tab close): Visits +1.
- * - Admin route access: strictly excluded.
+ *
+ * Rules:
+ * 1. Same browser/device = ONE unique user.
+ * 2. EVERY new website page load/entry = ONE visit.
+ * 3. Multiple identical tracking requests from the same page load = ONE visit (deduplicated by event ID).
+ * 4. Admin activity = strictly excluded.
  */
 export function trackWebsiteVisit(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
   if (typeof navigator !== "undefined" && !navigator.onLine) return Promise.resolve();
 
-  // STRICT ADMIN EXCLUSION: Admin dashboard access must NEVER count as a public visitor or session
+  // STRICT ADMIN EXCLUSION: Admin dashboard access must NEVER count as a public visitor or visit
   const pathname = window.location.pathname.toLowerCase();
   if (
     pathname === "/admin" ||
@@ -118,7 +125,7 @@ export function trackWebsiteVisit(): Promise<void> {
     // ignore
   }
 
-  // Deduplicate calls within the same page load
+  // Deduplicate calls within the same page load on the client side
   if (hasTrackedThisPageLoad && trackingPromise) {
     return trackingPromise;
   }
@@ -127,52 +134,12 @@ export function trackWebsiteVisit(): Promise<void> {
   const runTracking = async () => {
     try {
       const visitorId = getOrCreateVisitorId();
-      const now = Date.now();
-
-      // Check session status
-      let sessionId = "";
-      let isNewSession = false;
-
-      let storedSession: string | null = null;
-      let lastActive = 0;
-
-      try {
-        storedSession = sessionStorage.getItem(SESSION_ID_KEY);
-        const lastActiveStr =
-          localStorage.getItem(SESSION_LAST_ACTIVE_KEY) ||
-          sessionStorage.getItem(SESSION_LAST_ACTIVE_KEY);
-        lastActive = lastActiveStr ? parseInt(lastActiveStr, 10) : 0;
-      } catch {
-        // Storage access error
-      }
-
-      if (!storedSession || isNaN(lastActive) || now - lastActive > SESSION_TIMEOUT_MS) {
-        // Brand new session: either first visit, or user returned after > 30 minutes of inactivity
-        sessionId = generateRandomId("ses");
-        isNewSession = true;
-        try {
-          sessionStorage.setItem(SESSION_ID_KEY, sessionId);
-          sessionStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(now));
-          localStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(now));
-        } catch {
-          // ignore
-        }
-      } else {
-        // Existing active session within 30 minutes timeout
-        sessionId = storedSession;
-        isNewSession = false;
-        try {
-          sessionStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(now));
-          localStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(now));
-        } catch {
-          // ignore
-        }
-      }
+      const visitEventId = CURRENT_PAGE_VISIT_EVENT_ID;
 
       const payload = {
         visitorId,
-        sessionId,
-        isNewSession,
+        visitEventId,
+        sessionId: visitEventId, // backwards compatibility alias
       };
 
       // 1. Dispatch to REST endpoint
@@ -204,7 +171,7 @@ export function trackWebsiteVisit(): Promise<void> {
     } else {
       setTimeout(() => {
         runTracking().finally(resolve);
-      }, 500);
+      }, 300);
     }
   });
 

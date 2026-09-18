@@ -290,24 +290,26 @@ let visitProcessingLock = Promise.resolve();
 
 export async function recordVisitDirect(data: {
   visitorId: string;
-  sessionId: string;
-  isNewSession: boolean;
+  visitEventId?: string;
+  sessionId?: string;
+  isNewSession?: boolean;
 }): Promise<{ success: boolean; recorded: boolean }> {
   return new Promise((resolve, reject) => {
     visitProcessingLock = visitProcessingLock
       .then(async () => {
         const rawVisitorId = String(data.visitorId || "").trim();
-        const rawSessionId = String(data.sessionId || "").trim();
-        const isNewSession = Boolean(data.isNewSession);
+        const rawEventId = String(data.visitEventId || data.sessionId || "").trim();
 
         const visitorId = rawVisitorId.slice(0, 64) || `v_${Date.now()}`;
-        const sessionId = rawSessionId.slice(0, 64) || `s_${Date.now()}`;
+        const visitEventId =
+          rawEventId.slice(0, 64) ||
+          `pve_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
         const now = new Date();
         const nowIso = now.toISOString();
         const todayStr = getLocalDateString(now);
 
-        // Read latest state bypassing stale memory cache
+        // Read latest state directly (bypassing stale memory cache)
         const store = await readAnalyticsFromFile(true);
 
         const existingVisitor = store.visitors[visitorId];
@@ -317,27 +319,35 @@ export async function recordVisitDirect(data: {
             existingVisitor.daysVisited.push(todayStr);
           }
         } else {
+          // New unique anonymous user on a new browser/device
           store.visitors[visitorId] = {
             visitorId,
             firstSeen: nowIso,
             lastSeen: nowIso,
-            totalVisits: 1,
+            totalVisits: 0, // incremented below when the visit event is recorded
             daysVisited: [todayStr],
           };
         }
 
         let recordedNewVisit = false;
-        // Strict session deduplication: has this sessionId already been recorded as a visit?
-        const sessionAlreadyRecorded = store.visits.some((v) => v.sessionId === sessionId);
+        // DUPLICATE REQUEST PROTECTION:
+        // A single page load has one unique visitEventId.
+        // If multiple requests with this same event ID arrive (React re-render, retries, etc.),
+        // only the first request records a visit.
+        const eventAlreadyRecorded = store.visits.some(
+          (v) => v.id === visitEventId || v.sessionId === visitEventId,
+        );
 
-        if (isNewSession && !sessionAlreadyRecorded) {
+        if (!eventAlreadyRecorded) {
+          // Every intentional new page load/entry creates exactly ONE visit
           store.visits.push({
-            id: `vt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            id: visitEventId,
+            sessionId: visitEventId,
             visitorId,
-            sessionId,
             timestamp: nowIso,
             date: todayStr,
           });
+
           const targetVisitor = store.visitors[visitorId];
           if (targetVisitor) {
             targetVisitor.totalVisits = (targetVisitor.totalVisits || 0) + 1;
@@ -492,10 +502,11 @@ export const recordVisitServerFn = createServerFn({ method: "POST" })
       throw new Error("Invalid request body");
     }
     const d = data as Record<string, unknown>;
+    const eventId = String(d.visitEventId || d.sessionId || "").trim();
     return {
-      visitorId: String(d.visitorId || ""),
-      sessionId: String(d.sessionId || ""),
-      isNewSession: Boolean(d.isNewSession),
+      visitorId: String(d.visitorId || "").trim(),
+      visitEventId: eventId,
+      sessionId: eventId,
     };
   })
   .handler(async ({ data }) => {
