@@ -50,7 +50,7 @@ function adminApiPlugin(): Plugin {
             await import("./src/lib/admin-auth-server");
 
           if (pathname === "/api/admin/verify-recovery-code") {
-            const result = executeVerifyRecoveryCode(String(body.recoveryCode || ""));
+            const result = await executeVerifyRecoveryCode(String(body.recoveryCode || ""));
             res.statusCode = result.success ? 200 : 400;
             res.end(JSON.stringify(result));
             return;

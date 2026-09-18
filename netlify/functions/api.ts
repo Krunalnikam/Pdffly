@@ -2,23 +2,28 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+import {
+  verifyAdminKey,
+  executeVerifyRecoveryCode,
+  executeAdminPasswordReset,
+  getRegisteredAdminEmail,
+  maskEmail,
+  readStoredAuth,
+} from "../../src/lib/admin-auth-store";
 
 // CORS Headers
-const CORS_HEADERS = {
+const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin",
   "Content-Type": "application/json; charset=utf-8",
 };
 
-// Permanent Fixed Salt and PBKDF2-SHA512 Hash for the Admin Recovery Code:
-// Code: PDFLY-ADMIN-8472-X9K6
-const PERMANENT_RECOVERY_SALT = "pdfly_fixed_recovery_salt_2026_s8472x9k6";
-const PERMANENT_RECOVERY_HASH =
-  "908ff98e2639c4960009ed3a55249a1cc543806b7a46d41730a0dc3596c2e4b2a2dfc606b3aad0f8c25b83593fc7d06ebc35e4d2e6e57cf50b553e0ded7861d9";
-
-// Active in-memory reset sessions
-const activeResetTokens = new Map<string, { expiresAt: number }>();
+interface ApiResponse {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: string;
+}
 
 function getDataDir(): string {
   if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
@@ -27,127 +32,106 @@ function getDataDir(): string {
   return path.join(process.cwd(), "data");
 }
 
-function getAuthFilePath(): string {
-  return path.join(getDataDir(), "admin-auth.json");
+interface StoredItemRecord {
+  id: string;
+  type?: string;
+  rating?: number;
+  message?: string;
+  email?: string;
+  timestamp?: string;
+  language?: string;
+  [key: string]: unknown;
 }
 
-interface StoredAdminAuth {
-  passwordHash: string;
-  salt: string;
-  iterations: number;
-  updatedAt: string;
-  changedVia: string;
-}
-
-function hashPassword(password: string, salt: string, iterations = 100000): string {
-  return crypto.pbkdf2Sync(password, salt, iterations, 64, "sha512").toString("hex");
-}
-
-async function readStoredAuth(): Promise<StoredAdminAuth | null> {
-  const primaryPath = getAuthFilePath();
+// Helpers for feedback data
+async function readFeedbacks(): Promise<StoredItemRecord[]> {
+  const primaryPath = path.join(getDataDir(), "feedback.json");
   try {
-    const raw = await fs.readFile(primaryPath, "utf-8");
-    return JSON.parse(raw) as StoredAdminAuth;
+    const content = await fs.readFile(primaryPath, "utf-8");
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed)) return parsed as StoredItemRecord[];
   } catch {
-    const repoPath = path.join(process.cwd(), "data", "admin-auth.json");
+    const seedPath = path.join(process.cwd(), "data", "feedback.json");
     try {
-      const raw = await fs.readFile(repoPath, "utf-8");
-      return JSON.parse(raw) as StoredAdminAuth;
+      const content = await fs.readFile(seedPath, "utf-8");
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) return parsed as StoredItemRecord[];
+    } catch {
+      // not found
+    }
+  }
+  return [];
+}
+
+async function writeFeedbacks(items: StoredItemRecord[]): Promise<void> {
+  const primaryPath = path.join(getDataDir(), "feedback.json");
+  try {
+    await fs.mkdir(getDataDir(), { recursive: true });
+    await fs.writeFile(primaryPath, JSON.stringify(items, null, 2), "utf-8");
+  } catch {
+    const tmp = path.join(os.tmpdir(), "pdfly-data", "feedback.json");
+    await fs.mkdir(path.dirname(tmp), { recursive: true });
+    await fs.writeFile(tmp, JSON.stringify(items, null, 2), "utf-8");
+  }
+}
+
+// Helpers for analytics data
+async function readAnalytics(): Promise<Record<string, unknown> | null> {
+  const primaryPath = path.join(getDataDir(), "analytics.json");
+  try {
+    const content = await fs.readFile(primaryPath, "utf-8");
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    const seedPath = path.join(process.cwd(), "data", "analytics.json");
+    try {
+      const content = await fs.readFile(seedPath, "utf-8");
+      return JSON.parse(content) as Record<string, unknown>;
     } catch {
       return null;
     }
   }
 }
 
-async function writeStoredAuth(auth: StoredAdminAuth): Promise<void> {
-  const dir = getDataDir();
-  const filePath = getAuthFilePath();
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(auth, null, 2), "utf-8");
-  } catch (err) {
-    const tmpDir = path.join(os.tmpdir(), "pdfly-data");
-    await fs.mkdir(tmpDir, { recursive: true });
-    await fs.writeFile(
-      path.join(tmpDir, "admin-auth.json"),
-      JSON.stringify(auth, null, 2),
-      "utf-8",
-    );
-  }
+interface SsrHandler {
+  default: {
+    fetch: (req: Request) => Promise<Response>;
+  };
 }
 
-function verifyRecoveryCode(candidate: string): boolean {
-  if (!candidate || typeof candidate !== "string") return false;
-  const normalized = candidate.trim().toUpperCase();
-  if (!normalized) return false;
+// Lazy loaded TanStack Start SSR module for handling /_serverFn RPC
+let ssrModule: SsrHandler | null = null;
+let ssrLoadAttempted = false;
 
-  if (process.env.ADMIN_RECOVERY_CODE) {
-    const envNormalized = process.env.ADMIN_RECOVERY_CODE.trim().toUpperCase();
+async function getSsr(): Promise<SsrHandler | null> {
+  if (!ssrLoadAttempted) {
+    ssrLoadAttempted = true;
     try {
-      const a = Buffer.from(normalized);
-      const b = Buffer.from(envNormalized);
-      if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
-        return true;
-      }
+      const ssrPath = path.resolve(process.cwd(), "dist/server/_ssr/ssr.mjs");
+      ssrModule = (await import(ssrPath)) as SsrHandler;
     } catch {
-      // ignore
+      try {
+        const fallbackPath = "./_ssr/ssr.mjs";
+        ssrModule = (await import(fallbackPath)) as SsrHandler;
+      } catch {
+        ssrModule = null;
+      }
     }
   }
-
-  try {
-    const candidateHash = crypto
-      .pbkdf2Sync(normalized, PERMANENT_RECOVERY_SALT, 100000, 64, "sha512")
-      .toString("hex");
-    const a = Buffer.from(candidateHash, "hex");
-    const b = Buffer.from(PERMANENT_RECOVERY_HASH, "hex");
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
+  return ssrModule;
 }
 
-async function verifyAdminKey(providedKey: string): Promise<boolean> {
-  if (!providedKey || typeof providedKey !== "string") return false;
-  const trimmed = providedKey.trim();
-  if (!trimmed) return false;
-
-  const customAuth = await readStoredAuth();
-  if (customAuth) {
-    const computedHash = hashPassword(trimmed, customAuth.salt, customAuth.iterations || 100000);
-    try {
-      const a = Buffer.from(computedHash, "hex");
-      const b = Buffer.from(customAuth.passwordHash, "hex");
-      if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
-        return true;
-      }
-    } catch {
-      return false;
-    }
-    return false;
-  }
-
-  const defaultKey = process.env.FEEDBACK_ADMIN_KEY?.trim() || "Krunal21128q";
-  return trimmed === defaultKey;
-}
-
-interface ApiResponse {
-  statusCode: number;
-  body: string;
-  headers: Record<string, string>;
-}
-
-async function processRequest(
-  httpMethod: string,
+/**
+ * Main API request processor.
+ * Always guarantees JSON responses.
+ */
+export async function processRequest(
+  method: string,
   pathname: string,
-  bodyString?: string | null,
+  bodyText: string | null,
+  rawRequest?: Request,
 ): Promise<ApiResponse> {
-  // Normalize path
-  const cleanPath = pathname
-    .replace(/^\/\.netlify\/functions\/api/, "")
-    .replace(/^\/api/, "")
-    .replace(/\/$/, "");
-
-  if (httpMethod === "OPTIONS") {
+  // Handle OPTIONS preflight
+  if (method === "OPTIONS") {
     return {
       statusCode: 204,
       headers: CORS_HEADERS,
@@ -155,173 +139,69 @@ async function processRequest(
     };
   }
 
+  // Normalize path
+  let cleanPath = pathname;
+  if (cleanPath.startsWith("/.netlify/functions/api")) {
+    cleanPath = cleanPath.slice("/.netlify/functions/api".length);
+  }
+  if (!cleanPath.startsWith("/")) {
+    cleanPath = `/${cleanPath}`;
+  }
+  if (cleanPath.endsWith("/") && cleanPath.length > 1) {
+    cleanPath = cleanPath.slice(0, -1);
+  }
+
+  // 0. Forward /_serverFn or /_server requests to TanStack Start SSR runner if available
+  if (cleanPath.startsWith("/_serverFn") || cleanPath.startsWith("/_server")) {
+    const ssr = await getSsr();
+    if (ssr && ssr.default && typeof ssr.default.fetch === "function") {
+      try {
+        const fetchReq =
+          rawRequest ||
+          new Request(`http://localhost:3000${cleanPath}`, {
+            method,
+            headers: {
+              "content-type": "application/json",
+              origin: "http://localhost:3000",
+              referer: "http://localhost:3000/",
+            },
+            body: bodyText,
+          });
+        const ssrRes = await ssr.default.fetch(fetchReq);
+        const resText = await ssrRes.text();
+        const headersMap: Record<string, string> = { ...CORS_HEADERS };
+        ssrRes.headers.forEach((val, key) => {
+          headersMap[key] = val;
+        });
+        return {
+          statusCode: ssrRes.status,
+          headers: headersMap,
+          body: resText,
+        };
+      } catch (err: unknown) {
+        console.error("SSR dispatch error:", err);
+      }
+    }
+  }
+
+  // Parse JSON body if present
   let body: Record<string, unknown> = {};
-  if (bodyString) {
+  if (bodyText && bodyText.trim()) {
     try {
-      body = JSON.parse(bodyString);
+      body = JSON.parse(bodyText) as Record<string, unknown>;
     } catch {
       return {
         statusCode: 400,
         headers: CORS_HEADERS,
-        body: JSON.stringify({ success: false, error: "Invalid JSON payload" }),
+        body: JSON.stringify({
+          success: false,
+          error: "Malformed JSON in request body",
+        }),
       };
     }
   }
 
-  // 1. POST /admin/verify-recovery-code
-  if (cleanPath === "/admin/verify-recovery-code" || cleanPath.endsWith("/verify-recovery-code")) {
-    if (httpMethod !== "POST") {
-      return {
-        statusCode: 405,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({ success: false, error: "Method not allowed. Use POST." }),
-      };
-    }
-
-    const code = String(body.recoveryCode || "").trim();
-    if (!code) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({
-          success: false,
-          error: "Please enter your Admin Recovery Code.",
-        }),
-      };
-    }
-
-    const isValid = verifyRecoveryCode(code);
-    if (!isValid) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({
-          success: false,
-          error: "Invalid Recovery Code. Please check the code and try again.",
-        }),
-      };
-    }
-
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    activeResetTokens.set(resetToken, {
-      expiresAt: Date.now() + 15 * 60 * 1000,
-    });
-
-    return {
-      statusCode: 200,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({
-        success: true,
-        resetToken,
-      }),
-    };
-  }
-
-  // 2. POST /admin/reset-password
-  if (cleanPath === "/admin/reset-password" || cleanPath.endsWith("/reset-password")) {
-    if (httpMethod !== "POST") {
-      return {
-        statusCode: 405,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({ success: false, error: "Method not allowed. Use POST." }),
-      };
-    }
-
-    const resetToken = String(body.resetToken || "").trim();
-    const newPassword = String(body.newPassword || "");
-    const confirmPassword = String(body.confirmPassword || "");
-
-    if (!resetToken) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({
-          success: false,
-          error: "Invalid or missing reset session. Please re-enter your Recovery Code.",
-        }),
-      };
-    }
-
-    const session = activeResetTokens.get(resetToken);
-    const now = Date.now();
-    if (!session || now > session.expiresAt) {
-      if (session) activeResetTokens.delete(resetToken);
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({
-          success: false,
-          error: "Your reset session has expired. Please re-enter your Recovery Code.",
-        }),
-      };
-    }
-
-    if (!newPassword) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({ success: false, error: "New password cannot be empty." }),
-      };
-    }
-
-    if (newPassword !== confirmPassword) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({ success: false, error: "Passwords do not match." }),
-      };
-    }
-
-    if (newPassword.length < 8) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({
-          success: false,
-          error: "Password must be at least 8 characters long.",
-        }),
-      };
-    }
-
-    const hasLetter = /[a-zA-Z]/.test(newPassword);
-    const hasNumber = /[0-9]/.test(newPassword);
-    if (!hasLetter || !hasNumber) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({
-          success: false,
-          error: "Password must contain at least one letter and one number.",
-        }),
-      };
-    }
-
-    const salt = crypto.randomBytes(16).toString("hex");
-    const iterations = 100000;
-    const passwordHash = hashPassword(newPassword, salt, iterations);
-
-    const storedAuth: StoredAdminAuth = {
-      passwordHash,
-      salt,
-      iterations,
-      updatedAt: new Date().toISOString(),
-      changedVia: "recovery_code",
-    };
-
-    await writeStoredAuth(storedAuth);
-    activeResetTokens.delete(resetToken);
-
-    return {
-      statusCode: 200,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({
-        success: true,
-        message: "Password changed successfully.",
-      }),
-    };
-  }
-
-  // 3. POST /admin/verify-key
+  // 1. POST /api/admin/verify-key
   if (cleanPath === "/admin/verify-key" || cleanPath.endsWith("/verify-key")) {
     const adminKey = String(body.adminKey || "").trim();
     const authorized = await verifyAdminKey(adminKey);
@@ -335,13 +215,156 @@ async function processRequest(
     };
   }
 
+  // 2. POST /api/admin/verify-recovery-code
+  if (cleanPath === "/admin/verify-recovery-code" || cleanPath.endsWith("/verify-recovery-code")) {
+    const recoveryCode = String(body.recoveryCode || "").trim();
+    const result = await executeVerifyRecoveryCode(recoveryCode);
+
+    if (!result.success) {
+      return {
+        statusCode: 400,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          success: false,
+          error: result.error || "Invalid Recovery Code.",
+        }),
+      };
+    }
+
+    return {
+      statusCode: 200,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({
+        success: true,
+        resetToken: result.resetToken,
+        registeredEmail: result.registeredEmail,
+        message: "Recovery Code validated successfully.",
+      }),
+    };
+  }
+
+  // 3. POST /api/admin/reset-password
+  if (cleanPath === "/admin/reset-password" || cleanPath.endsWith("/reset-password")) {
+    const resetToken = String(body.resetToken || "").trim();
+    const newPassword = String(body.newPassword || "");
+    const confirmPassword = String(body.confirmPassword || "");
+
+    const result = await executeAdminPasswordReset({
+      resetToken,
+      newPassword,
+      confirmPassword,
+    });
+
+    if (!result.success) {
+      return {
+        statusCode: 400,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          success: false,
+          error: result.error || "Failed to reset password.",
+        }),
+      };
+    }
+
+    return {
+      statusCode: 200,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({
+        success: true,
+        message: result.message || "Admin password reset and persisted successfully.",
+      }),
+    };
+  }
+
+  // 4. POST /api/admin/data (Consolidated data loader for admin dashboard)
+  if (cleanPath === "/admin/data" || cleanPath.endsWith("/admin/data")) {
+    const adminKey = String(body.adminKey || "").trim();
+    const isAuthorized = await verifyAdminKey(adminKey);
+    if (!isAuthorized) {
+      return {
+        statusCode: 401,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          success: false,
+          error: "Unauthorized: Invalid admin credentials",
+        }),
+      };
+    }
+
+    const items = await readFeedbacks();
+    const filterType = String(body.filterType || "all");
+
+    // Calculate statistics
+    const total = items.length;
+    const totalRatingSum = items.reduce((acc, item) => acc + (Number(item.rating) || 0), 0);
+    const averageRating = total > 0 ? Number((totalRatingSum / total).toFixed(1)) : 0;
+    const bugsCount = items.filter((i) => i.type === "bug").length;
+    const featuresCount = items.filter((i) => i.type === "feature").length;
+    const improvementsCount = items.filter((i) => i.type === "improvement").length;
+    const generalCount = items.filter((i) => i.type === "general").length;
+
+    const stats = {
+      total,
+      averageRating,
+      bugsCount,
+      featuresCount,
+      improvementsCount,
+      generalCount,
+    };
+
+    let filtered = items;
+    if (filterType && filterType !== "all") {
+      filtered = items.filter((i) => i.type === filterType);
+    }
+
+    const analytics = await readAnalytics();
+
+    return {
+      statusCode: 200,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({
+        success: true,
+        items: filtered,
+        stats,
+        analytics,
+      }),
+    };
+  }
+
+  // 5. POST /api/admin/delete-feedback
+  if (cleanPath === "/admin/delete-feedback" || cleanPath.endsWith("/delete-feedback")) {
+    const adminKey = String(body.adminKey || "").trim();
+    const isAuthorized = await verifyAdminKey(adminKey);
+    if (!isAuthorized) {
+      return {
+        statusCode: 401,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          success: false,
+          error: "Unauthorized: Invalid admin credentials",
+        }),
+      };
+    }
+
+    const id = String(body.id || "");
+    const items = await readFeedbacks();
+    const updated = items.filter((i) => i.id !== id);
+    await writeFeedbacks(updated);
+
+    return {
+      statusCode: 200,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({ success: true, message: "Feedback deleted" }),
+    };
+  }
+
   // Fallback for unhandled API routes — ALWAYS JSON, NEVER HTML!
   return {
     statusCode: 404,
     headers: CORS_HEADERS,
     body: JSON.stringify({
       success: false,
-      error: `API route not found: ${pathname}`,
+      error: `API route not found: ${cleanPath}`,
     }),
   };
 }
@@ -373,7 +396,7 @@ export default async function (request: Request): Promise<Response> {
         ? await request.text()
         : null;
 
-    const res = await processRequest(request.method, url.pathname, bodyText);
+    const res = await processRequest(request.method, url.pathname, bodyText, request);
     return new Response(res.body, {
       status: res.statusCode,
       headers: res.headers,

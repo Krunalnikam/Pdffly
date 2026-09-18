@@ -89,27 +89,68 @@ export function AdminFeedbackModal({
       setIsLoadingList(true);
       setIsLoadingAnalytics(true);
       try {
-        const [feedbackRes, analyticsRes] = await Promise.all([
-          getAdminFeedbackListServerFn({
-            data: {
-              adminKey: key,
-              filterType: filter,
-            },
-          }),
-          getAdminAnalyticsServerFn({
-            data: {
-              adminKey: key,
-            },
-          }),
-        ]);
+        let loadedFromFn = false;
 
-        if (feedbackRes && feedbackRes.success) {
-          setItems(feedbackRes.items);
-          setStats(feedbackRes.stats);
+        // 1. Try server function RPC
+        try {
+          const [feedbackRes, analyticsRes] = await Promise.all([
+            getAdminFeedbackListServerFn({
+              data: {
+                adminKey: key,
+                filterType: filter,
+              },
+            }),
+            getAdminAnalyticsServerFn({
+              data: {
+                adminKey: key,
+              },
+            }),
+          ]);
+
+          if (feedbackRes && feedbackRes.success) {
+            setItems(feedbackRes.items);
+            setStats(feedbackRes.stats);
+          }
+
+          if (analyticsRes && analyticsRes.success) {
+            setAnalytics(analyticsRes.analytics);
+          }
+          loadedFromFn = true;
+        } catch (fnErr: unknown) {
+          const msg = fnErr instanceof Error ? fnErr.message : "";
+          if (msg.toLowerCase().includes("unauthorized")) {
+            throw fnErr;
+          }
         }
 
-        if (analyticsRes && analyticsRes.success) {
-          setAnalytics(analyticsRes.analytics);
+        // 2. Direct REST API fallback for production deployments
+        if (!loadedFromFn) {
+          const res = await fetch("/api/admin/data", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              adminKey: key,
+              filterType: filter,
+            }),
+          });
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const data = await res.json();
+            if (data && data.success) {
+              if (data.items && data.stats) {
+                setItems(data.items);
+                setStats(data.stats);
+              }
+              if (data.analytics) {
+                setAnalytics(data.analytics);
+              }
+            } else if (data && data.error && data.error.toLowerCase().includes("unauthorized")) {
+              throw new Error("Unauthorized: Invalid admin credentials");
+            }
+          }
         }
 
         setAuthError(null);
@@ -158,11 +199,44 @@ export function AdminFeedbackModal({
     setAuthError(null);
 
     try {
-      const verifyRes = await verifyAdminKeyServerFn({
-        data: { adminKey: trimmed },
-      });
+      let isAuthorized = false;
 
-      if (verifyRes && verifyRes.authorized) {
+      // 1. Direct REST API verification (guaranteed JSON response across environments)
+      try {
+        const res = await fetch("/api/admin/verify-key", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ adminKey: trimmed }),
+        });
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await res.json();
+          if (data && typeof data.authorized === "boolean") {
+            isAuthorized = data.authorized;
+          }
+        }
+      } catch (restErr) {
+        console.warn("REST verify-key check error:", restErr);
+      }
+
+      // 2. Server Function fallback
+      if (!isAuthorized) {
+        try {
+          const verifyRes = await verifyAdminKeyServerFn({
+            data: { adminKey: trimmed },
+          });
+          if (verifyRes && verifyRes.authorized) {
+            isAuthorized = true;
+          }
+        } catch (fnErr) {
+          console.warn("ServerFn verifyAdminKeyServerFn error:", fnErr);
+        }
+      }
+
+      if (isAuthorized) {
         setActivePasskey(trimmed);
         try {
           sessionStorage.setItem(ADMIN_STORAGE_KEY, trimmed);
@@ -207,12 +281,26 @@ export function AdminFeedbackModal({
 
     setDeletingId(id);
     try {
-      await deleteFeedbackServerFn({
-        data: {
-          adminKey: activePasskey,
-          id,
-        },
-      });
+      try {
+        await deleteFeedbackServerFn({
+          data: {
+            adminKey: activePasskey,
+            id,
+          },
+        });
+      } catch {
+        await fetch("/api/admin/delete-feedback", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            adminKey: activePasskey,
+            id,
+          }),
+        });
+      }
       // Refresh list
       await loadData(activePasskey, selectedFilter);
     } catch (err) {

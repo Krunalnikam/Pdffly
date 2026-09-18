@@ -101,8 +101,8 @@ export function PromotionDetailsModal({ promotion, isOpen, onClose }: PromotionD
           <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/30 p-3 rounded-lg border border-border/40">
             <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
             <span>
-              Verified external resource for students. Opens securely in a new browser tab. PDFfly
-              remains 100% free and uninterrupted.
+              Verified external resource for students. Opens securely in a new browser tab. PDFly
+              remains 100% free with no interruptions to your documents.
             </span>
           </div>
 

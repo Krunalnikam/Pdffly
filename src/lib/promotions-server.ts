@@ -113,7 +113,7 @@ async function writePromotionsToFile(items: PromotionItem[]): Promise<void> {
 }
 
 /**
- * Server Function: Get all ACTIVE promotions for PDFfly first page
+ * Server Function: Get all ACTIVE promotions for PDFly first page
  * Public, ultra-lightweight and cached-friendly
  */
 export const getActivePromotionsServerFn = createServerFn({ method: "GET" }).handler(async () => {
