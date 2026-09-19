@@ -1,5 +1,5 @@
 import { createFileRoute, useBlocker } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowDown,
@@ -130,7 +130,16 @@ function Index() {
   const [subject, setSubject] = useState("");
   const [examPhase, setExamPhase] = useState("");
   const [images, setImages] = useState<UploadedImage[]>([]);
+  // The Reverse Page Order button's VISUAL/UI state is the opposite of the ACTUAL internal processing state:
+  // - Button visually OFF (isReverseOrder === false) -> Actual Reverse is ON (!isReverseOrder === true)
+  // - Button visually ON (isReverseOrder === true) -> Actual Reverse is OFF (!isReverseOrder === false)
+  // Default: isReverseOrder is false (visually OFF), so actualReverseProcessing is true (REVERSE = ON).
   const [isReverseOrder, setIsReverseOrder] = useState(false);
+  const actualReverseProcessing = !isReverseOrder;
+  const processedImages = useMemo(
+    () => (actualReverseProcessing ? [...images].reverse() : images),
+    [images, actualReverseProcessing],
+  );
   const [smartFilterEnabled, setSmartFilterEnabled] = useState(false);
   const [qualityPreset, setQualityPreset] = useState<PdfQualityPreset>("compact");
   const [rotatingId, setRotatingId] = useState<string | null>(null);
@@ -301,20 +310,15 @@ function Index() {
       }
     });
 
-    // UI OFF (!isReverseOrder) -> Actual Reverse ON (reverse newly picked camera batch)
-    // UI ON (isReverseOrder) -> Actual Reverse OFF (original order)
-    const isActualReverse = !isReverseOrder;
-    const batchToAdd = isActualReverse ? [...newImages].reverse() : newImages;
-
-    // CRITICAL: Append the new batch strictly to the END of existing images (existing images are never re-reversed)
-    setImages((prev) => [...prev, ...batchToAdd]);
+    // Append the newly selected images to the images collection
+    setImages((prev) => [...prev, ...newImages]);
     setErrors(({ images: _omit, ...rest }) => rest);
     setResult(null);
 
     if (inputRef.current) inputRef.current.value = "";
 
     // Asynchronously process the newly added images in-place with Auto Crop
-    processAutoCropForImages(batchToAdd);
+    processAutoCropForImages(newImages);
   };
 
   const processAutoCropForImages = async (targetImages: UploadedImage[]) => {
@@ -418,21 +422,17 @@ function Index() {
   };
 
   const moveImage = (index: number, direction: "up" | "down") => {
-    setImages((prev) => {
-      const copy = [...prev];
-      const targetIndex = direction === "up" ? index - 1 : index + 1;
-      if (targetIndex < 0 || targetIndex >= copy.length) return prev;
-      const [item] = copy.splice(index, 1);
-      if (item) copy.splice(targetIndex, 0, item);
-      return copy;
-    });
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= processedImages.length) return;
+    const nextProcessed = [...processedImages];
+    const [moved] = nextProcessed.splice(index, 1);
+    if (moved) nextProcessed.splice(targetIndex, 0, moved);
+    setImages(actualReverseProcessing ? [...nextProcessed].reverse() : nextProcessed);
   };
 
   const toggleReverseOrder = () => {
-    const next = !isReverseOrder;
-    setIsReverseOrder(next);
+    setIsReverseOrder((prev) => !prev);
     if (images.length >= 2) {
-      setImages((prev) => [...prev].reverse());
       notify(t("orderReversedNotify", { count: images.length }));
     }
   };
@@ -620,7 +620,7 @@ function Index() {
     });
 
     try {
-      const totalOriginalSize = images.reduce((acc, img) => acc + (img.size || 0), 0);
+      const totalOriginalSize = processedImages.reduce((acc, img) => acc + (img.size || 0), 0);
       const { blob, fileName } = await generateAssignmentPdf(
         {
           branch: activeBranch,
@@ -628,7 +628,7 @@ function Index() {
           subject: subject.trim().toUpperCase(),
           examPhase: examPhase.trim().toUpperCase(),
         },
-        images,
+        processedImages,
         smartFilterEnabled,
         qualityPreset,
         (progress) => {
@@ -972,7 +972,7 @@ function Index() {
                       )}
                     </div>
                     <ul className="divide-y divide-border/60 rounded-lg border border-border bg-card">
-                      {images.map((image, index) => (
+                      {processedImages.map((image, index) => (
                         <li
                           key={image.id}
                           className="flex flex-wrap items-center justify-between gap-3 p-3 sm:flex-nowrap"
@@ -1378,7 +1378,7 @@ function Index() {
                   </p>
                 ) : (
                   <ul className="grid grid-cols-3 gap-2.5">
-                    {images.map((image, index) => (
+                    {processedImages.map((image, index) => (
                       <li
                         key={image.id}
                         className="group relative cursor-pointer"
