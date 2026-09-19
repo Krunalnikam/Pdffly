@@ -39,6 +39,14 @@ export interface ApiResponse {
   body: unknown;
 }
 
+const NO_CACHE_HEADERS: Record<string, string> = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+  Pragma: "no-cache",
+  Expires: "0",
+  "Surrogate-Control": "no-store",
+  "Netlify-CDN-Cache-Control": "no-store",
+};
+
 // Known serverFn IDs mapping to direct handlers
 type RpcHandler = (payload: Record<string, unknown> | undefined) => Promise<unknown>;
 
@@ -179,6 +187,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
 
       return {
         statusCode: 200,
+        headers: NO_CACHE_HEADERS,
         body: {
           success: true,
           items: feedbackData.items,
@@ -326,6 +335,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
       });
       return {
         statusCode: 200,
+        headers: NO_CACHE_HEADERS,
         body: result,
       };
     }
@@ -338,6 +348,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
       const result = await getAdminAnalyticsDirect(String(body.adminKey || ""));
       return {
         statusCode: 200,
+        headers: NO_CACHE_HEADERS,
         body: result,
       };
     }
@@ -346,6 +357,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
       const activeCount = await recordActiveStudentHeartbeat(String(body.visitorId || ""));
       return {
         statusCode: 200,
+        headers: NO_CACHE_HEADERS,
         body: { success: true, activeCount },
       };
     }
@@ -354,6 +366,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
       const activeCount = await removeActiveStudent(String(body.visitorId || ""));
       return {
         statusCode: 200,
+        headers: NO_CACHE_HEADERS,
         body: { success: true, activeCount },
       };
     }
@@ -373,6 +386,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
         const result = await handler(rpcPayload);
         return {
           statusCode: 200,
+          headers: NO_CACHE_HEADERS,
           body: result,
         };
       }
@@ -381,6 +395,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
       console.warn(`[ApiRouter] Unrecognized serverFn ID: ${serverFnId}`);
       return {
         statusCode: 200,
+        headers: NO_CACHE_HEADERS,
         body: { success: false, error: `Handler not registered for ${serverFnId}` },
       };
     }
@@ -388,6 +403,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
     // Default 404 for unmatched API routes
     return {
       statusCode: 404,
+      headers: NO_CACHE_HEADERS,
       body: { success: false, error: `API route not found: ${pathname}` },
     };
   } catch (err: unknown) {
@@ -395,6 +411,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
     const message = err instanceof Error ? err.message : "Internal Server Error";
     return {
       statusCode: 500,
+      headers: NO_CACHE_HEADERS,
       body: { success: false, error: message },
     };
   }

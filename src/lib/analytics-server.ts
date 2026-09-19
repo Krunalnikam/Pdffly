@@ -1,6 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { verifyAdminKey } from "./admin-auth-server";
-import { readStorageData, writeStorageData, getBlobStore } from "./storage-provider";
+import {
+  readStorageData,
+  writeStorageData,
+  getBlobStore,
+  readBlobSafe,
+  writeBlobSafe,
+  isNetlifyProduction,
+} from "./storage-provider";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -24,6 +31,14 @@ export interface StoredAnalyticsData {
   visitors: Record<string, VisitorRecord>;
   visits: VisitEvent[];
   lastActivity: string; // ISO 8601
+  watermarkTotalUsers?: number;
+  watermarkTotalVisits?: number;
+}
+
+export interface AnalyticsWatermark {
+  highestTotalUsers: number;
+  highestTotalVisits: number;
+  lastUpdated: string;
 }
 
 export interface ActivityBucket {
@@ -43,6 +58,18 @@ export interface AnalyticsSummary {
   dailyVisitors: ActivityBucket[];
   weeklyVisitors: ActivityBucket[];
   monthlyVisitors: ActivityBucket[];
+}
+
+// In-process monotonic watermark to strictly prevent any instance from returning lower numbers
+let processMonotonicWatermark: StoredAnalyticsData | null = null;
+
+export function updateMonotonicWatermark(incoming: StoredAnalyticsData): StoredAnalyticsData {
+  if (!processMonotonicWatermark) {
+    processMonotonicWatermark = incoming;
+    return incoming;
+  }
+  processMonotonicWatermark = mergeAnalyticsData(processMonotonicWatermark, incoming);
+  return processMonotonicWatermark;
 }
 
 // Get current date string formatted as YYYY-MM-DD
@@ -112,11 +139,11 @@ export function mergeAnalyticsData(
     }
   }
 
-  // 3. Deduplicate and merge visits by unique sessionId or visit id
+  // 3. Deduplicate and merge visits by unique visit event ID (primary) or session id (secondary)
   const visitMap = new Map<string, VisitEvent>();
   const addVisit = (ve: VisitEvent) => {
     if (!ve) return;
-    const key = ve.sessionId ? `ses:${ve.sessionId}` : ve.id ? `id:${ve.id}` : null;
+    const key = ve.id ? `id:${ve.id}` : ve.sessionId ? `ses:${ve.sessionId}` : null;
     if (key && !visitMap.has(key)) {
       visitMap.set(key, ve);
     }
@@ -144,18 +171,99 @@ export function mergeAnalyticsData(
       ? base.lastActivity
       : incoming.lastActivity || new Date().toISOString();
 
+  const watermarkTotalUsers = Math.max(
+    base.watermarkTotalUsers || 0,
+    incoming.watermarkTotalUsers || 0,
+    Object.keys(base.visitors || {}).length,
+    Object.keys(incoming.visitors || {}).length,
+    Object.keys(mergedVisitors).length,
+  );
+
+  const watermarkTotalVisits = Math.max(
+    base.watermarkTotalVisits || 0,
+    incoming.watermarkTotalVisits || 0,
+    (base.visits || []).length,
+    (incoming.visits || []).length,
+    mergedVisits.length,
+  );
+
   return {
     visitors: mergedVisitors,
     visits: mergedVisits,
     lastActivity,
+    watermarkTotalUsers,
+    watermarkTotalVisits,
   };
 }
 
-// Helper to read analytics safely with authoritative Blobs and historical baseline seed protection
+/**
+ * Authoritatively reads analytics data:
+ * - In Netlify production, Netlify Blobs is the ONLY authoritative source of truth.
+ * - Production reads NEVER fall back to bundled JSON, data/analytics.json, or /tmp.
+ * - Applies monotonic watermark protection so counts can never decrease.
+ */
 export async function readAnalyticsFromFile(
   bypassCache: boolean = false,
 ): Promise<StoredAnalyticsData> {
-  const parsed = await readStorageData<StoredAnalyticsData>(
+  // 1. Authoritative Production Storage: Netlify Blobs direct read
+  if (isNetlifyProduction()) {
+    const blobData = await readBlobSafe<StoredAnalyticsData>("analytics-data", true);
+    if (
+      blobData &&
+      typeof blobData === "object" &&
+      blobData.visitors &&
+      typeof blobData.visitors === "object"
+    ) {
+      const cleanBlob: StoredAnalyticsData = {
+        visitors: blobData.visitors,
+        visits: Array.isArray(blobData.visits) ? blobData.visits : [],
+        lastActivity: blobData.lastActivity || new Date().toISOString(),
+        watermarkTotalUsers: Math.max(
+          blobData.watermarkTotalUsers || 0,
+          Object.keys(blobData.visitors).length,
+        ),
+        watermarkTotalVisits: Math.max(
+          blobData.watermarkTotalVisits || 0,
+          Array.isArray(blobData.visits) ? blobData.visits.length : 0,
+        ),
+      };
+      // Reconcile monotonically with process watermark
+      return updateMonotonicWatermark(cleanBlob);
+    }
+
+    // In production, if Blobs is empty or initializing, check if a persisted watermark blob exists
+    let persistedWatermark: AnalyticsWatermark | null = null;
+    try {
+      persistedWatermark = await readBlobSafe<AnalyticsWatermark>("analytics-watermark", true);
+    } catch {
+      // Non-fatal
+    }
+
+    if (processMonotonicWatermark) {
+      if (persistedWatermark) {
+        processMonotonicWatermark.watermarkTotalUsers = Math.max(
+          processMonotonicWatermark.watermarkTotalUsers || 0,
+          persistedWatermark.highestTotalUsers || 0,
+        );
+        processMonotonicWatermark.watermarkTotalVisits = Math.max(
+          processMonotonicWatermark.watermarkTotalVisits || 0,
+          persistedWatermark.highestTotalVisits || 0,
+        );
+      }
+      return processMonotonicWatermark;
+    }
+
+    // Production MUST NEVER fall back to bundled JSON (data/analytics.json) or /tmp!
+    const cleanDefault: StoredAnalyticsData = {
+      ...DEFAULT_ANALYTICS,
+      watermarkTotalUsers: persistedWatermark?.highestTotalUsers || 0,
+      watermarkTotalVisits: persistedWatermark?.highestTotalVisits || 0,
+    };
+    return updateMonotonicWatermark(cleanDefault);
+  }
+
+  // 2. In non-production environments (local Vite dev server or unit tests), read local storage
+  const localParsed = await readStorageData<StoredAnalyticsData>(
     "analytics-data",
     "analytics.json",
     DEFAULT_ANALYTICS,
@@ -163,59 +271,84 @@ export async function readAnalyticsFromFile(
   );
 
   let result: StoredAnalyticsData = DEFAULT_ANALYTICS;
-  if (parsed && typeof parsed === "object") {
+  if (localParsed && typeof localParsed === "object") {
     result = {
-      visitors: parsed.visitors || {},
-      visits: Array.isArray(parsed.visits) ? parsed.visits : [],
-      lastActivity: parsed.lastActivity || new Date().toISOString(),
+      visitors: localParsed.visitors || {},
+      visits: Array.isArray(localParsed.visits) ? localParsed.visits : [],
+      lastActivity: localParsed.lastActivity || new Date().toISOString(),
+      watermarkTotalUsers: localParsed.watermarkTotalUsers,
+      watermarkTotalVisits: localParsed.watermarkTotalVisits,
     };
   }
-
-  // Baseline seed protection: merge with bundled seed file in process.cwd()/data/analytics.json
-  // Guarantees historical recorded visitors and visits are never reset or dropped
-  try {
-    const seedPath = path.join(process.cwd(), "data", "analytics.json");
-    const seedRaw = await fs.readFile(seedPath, "utf-8");
-    const seedData = JSON.parse(seedRaw) as StoredAnalyticsData;
-    if (seedData && seedData.visitors) {
-      result = mergeAnalyticsData(seedData, result);
-    }
-  } catch {
-    // Seed file optional
-  }
-
-  return result;
+  return updateMonotonicWatermark(result);
 }
 
-// Helper to write analytics safely with monotonic merging
+/**
+ * Writes analytics safely with authoritative Blobs persistence and monotonic union merging.
+ */
 export async function writeAnalyticsToFile(
   data: StoredAnalyticsData,
 ): Promise<StoredAnalyticsData> {
   let dataToSave = data;
 
-  // 1. If Netlify Blobs is available, fetch the latest stored data with strong consistency and union-merge!
-  const store = getBlobStore();
-  if (store) {
-    try {
-      const existingBlob = await store.get("analytics-data", {
-        type: "json",
-        consistency: "strong",
-      });
-      if (existingBlob && typeof existingBlob === "object") {
-        dataToSave = mergeAnalyticsData(existingBlob as StoredAnalyticsData, dataToSave);
-      }
-    } catch {
-      // Netlify Blobs read fallback
+  // 1. Fetch latest authoritative state from Netlify Blobs with strong consistency and merge monotonically
+  try {
+    const existingBlob = await readBlobSafe<StoredAnalyticsData>("analytics-data", true);
+    if (existingBlob && typeof existingBlob === "object" && existingBlob.visitors) {
+      dataToSave = mergeAnalyticsData(existingBlob, dataToSave);
     }
+  } catch {
+    // Non-fatal
   }
+
+  // 2. Check persisted watermark from Netlify Blobs
+  let highestUsers = Math.max(
+    dataToSave.watermarkTotalUsers || 0,
+    Object.keys(dataToSave.visitors || {}).length,
+  );
+  let highestVisits = Math.max(
+    dataToSave.watermarkTotalVisits || 0,
+    (dataToSave.visits || []).length,
+    Object.values(dataToSave.visitors || {}).reduce((acc, v) => acc + (v.totalVisits || 0), 0),
+  );
+
+  try {
+    const wm = await readBlobSafe<AnalyticsWatermark>("analytics-watermark", true);
+    if (wm) {
+      highestUsers = Math.max(highestUsers, wm.highestTotalUsers || 0);
+      highestVisits = Math.max(highestVisits, wm.highestTotalVisits || 0);
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  dataToSave.watermarkTotalUsers = highestUsers;
+  dataToSave.watermarkTotalVisits = highestVisits;
+
+  // Reconcile with process monotonic watermark
+  dataToSave = updateMonotonicWatermark(dataToSave);
 
   // Cap recent visits at 10,000 to prevent unbounded memory growth while keeping history intact
   if (dataToSave.visits.length > 10000) {
     dataToSave.visits = dataToSave.visits.slice(-10000);
   }
 
-  // Monotonically save across Netlify Blobs, memory, and filesystem
-  await writeStorageData("analytics-data", "analytics.json", dataToSave);
+  // 3. Persist to Netlify Blobs as authoritative cloud storage
+  await writeBlobSafe("analytics-data", dataToSave);
+
+  // 4. Persist separate monotonic watermark to Netlify Blobs
+  const watermarkPayload: AnalyticsWatermark = {
+    highestTotalUsers: highestUsers,
+    highestTotalVisits: highestVisits,
+    lastUpdated: new Date().toISOString(),
+  };
+  await writeBlobSafe("analytics-watermark", watermarkPayload);
+
+  // 5. In local dev environment only, write to storage provider
+  if (!isNetlifyProduction()) {
+    await writeStorageData("analytics-data", "analytics.json", dataToSave);
+  }
+
   return dataToSave;
 }
 
@@ -387,8 +520,26 @@ export async function getAdminAnalyticsDirect(adminKey: string): Promise<{
   const todayStr = getLocalDateString(now);
 
   const allVisitors = Object.values(store.visitors);
-  const totalUsers = allVisitors.length;
-  const totalVisits = store.visits.length;
+  const computedUsers = allVisitors.length;
+  const computedVisits = Math.max(
+    store.visits.length,
+    allVisitors.reduce((sum, v) => sum + (v.totalVisits || 0), 0),
+  );
+
+  let watermarkUsers = store.watermarkTotalUsers || 0;
+  let watermarkVisits = store.watermarkTotalVisits || 0;
+  try {
+    const wm = await readBlobSafe<AnalyticsWatermark>("analytics-watermark", true);
+    if (wm) {
+      watermarkUsers = Math.max(watermarkUsers, wm.highestTotalUsers || 0);
+      watermarkVisits = Math.max(watermarkVisits, wm.highestTotalVisits || 0);
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  const totalUsers = Math.max(computedUsers, watermarkUsers);
+  const totalVisits = Math.max(computedVisits, watermarkVisits);
 
   const todayUsers = allVisitors.filter((v) => v.daysVisited.includes(todayStr)).length;
   const todayVisits = store.visits.filter((v) => v.date === todayStr).length;

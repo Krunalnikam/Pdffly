@@ -1,12 +1,18 @@
 import { handleApiRequest, type ApiRequest } from "../../src/lib/api-router";
+import { ensureNetlifyContext } from "../../src/lib/storage-provider";
 
-// CORS Headers
+// CORS & Anti-Cache Headers
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
   "Access-Control-Allow-Headers":
     "Content-Type, Authorization, X-Requested-With, Accept, Origin, x-tsr-serverFn, x-tsr-data",
   "Content-Type": "application/json; charset=utf-8",
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+  Pragma: "no-cache",
+  Expires: "0",
+  "Surrogate-Control": "no-store",
+  "Netlify-CDN-Cache-Control": "no-store",
 };
 
 export interface ApiResponse {
@@ -115,7 +121,9 @@ export const handler = async (event: {
   path: string;
   body: string | null;
   headers?: Record<string, string | undefined>;
+  blobs?: string;
 }): Promise<ApiResponse> => {
+  ensureNetlifyContext(event);
   try {
     return await processRequest(event.httpMethod, event.path, event.body);
   } catch (err: unknown) {
@@ -130,6 +138,7 @@ export const handler = async (event: {
 
 // Netlify Functions v2 default export (Web standard Request / Response)
 export default async function (request: Request): Promise<Response> {
+  ensureNetlifyContext();
   try {
     const url = new URL(request.url);
     const bodyText =

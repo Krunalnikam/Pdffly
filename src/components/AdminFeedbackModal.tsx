@@ -114,8 +114,8 @@ export function AdminFeedbackModal({
 
           if (analyticsRes && analyticsRes.success) {
             setAnalytics(analyticsRes.analytics);
+            loadedFromFn = true;
           }
-          loadedFromFn = true;
         } catch (fnErr: unknown) {
           const msg = fnErr instanceof Error ? fnErr.message : "";
           if (msg.toLowerCase().includes("unauthorized")) {
@@ -123,13 +123,16 @@ export function AdminFeedbackModal({
           }
         }
 
-        // 2. Direct REST API fallback for production deployments
+        // 2. Direct REST API fallback for production deployments (always cache-busted)
         if (!loadedFromFn) {
-          const res = await fetch("/api/admin/data", {
+          const res = await fetch(`/api/admin/data?t=${Date.now()}`, {
             method: "POST",
+            cache: "no-store",
             headers: {
               "Content-Type": "application/json",
               Accept: "application/json",
+              "Cache-Control": "no-cache, no-store",
+              Pragma: "no-cache",
             },
             body: JSON.stringify({
               adminKey: key,

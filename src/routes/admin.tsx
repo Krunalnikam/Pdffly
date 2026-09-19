@@ -96,8 +96,8 @@ function AdminDashboardPage() {
 
           if (analyticsRes && analyticsRes.success) {
             setAnalytics(analyticsRes.analytics);
+            loadedFromFn = true;
           }
-          loadedFromFn = true;
         } catch (fnErr: unknown) {
           const msg = fnErr instanceof Error ? fnErr.message : "";
           if (msg.toLowerCase().includes("unauthorized")) {
@@ -107,12 +107,15 @@ function AdminDashboardPage() {
 
         // 2. Direct REST API fallback for production deployments
         if (!loadedFromFn) {
-          const res = await fetch("/api/admin/data", {
+          const res = await fetch(`/api/admin/data?t=${Date.now()}`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               Accept: "application/json",
+              "Cache-Control": "no-cache, no-store",
+              Pragma: "no-cache",
             },
+            cache: "no-store",
             body: JSON.stringify({
               adminKey: key,
               filterType: filter,

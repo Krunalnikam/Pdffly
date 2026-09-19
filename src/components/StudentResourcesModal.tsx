@@ -16,7 +16,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { getActivePromotionsServerFn, recordPromotionClickServerFn } from "@/lib/promotions-server";
 import type { PromotionItem } from "@/types";
 
@@ -143,17 +142,9 @@ export function StudentResourcesModal({ isOpen, onClose }: StudentResourcesModal
               <Globe className="h-5 w-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <DialogTitle className="text-lg sm:text-xl font-bold text-foreground">
-                  Student Resources
-                </DialogTitle>
-                <Badge
-                  variant="outline"
-                  className="text-[10px] uppercase font-semibold tracking-wider text-primary border-primary/30 bg-primary/5 py-0 h-4"
-                >
-                  Free Tools
-                </Badge>
-              </div>
+              <DialogTitle className="text-lg sm:text-xl font-bold text-foreground">
+                Student Resources
+              </DialogTitle>
               <DialogDescription className="text-xs sm:text-sm text-muted-foreground mt-0.5">
                 Curated study tools, question papers, and educational resources to assist your
                 exams.
